@@ -1,52 +1,75 @@
-import { useEffect, useMemo, useState } from 'react';
-import { reportsApi, vehicleEventsApi } from '../../api/reports';
-import { aylar, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { vehicleEventsApi, washExpensesApi, washWaterApi } from '../../api/reports';
+import { aylar, cariAy, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
 function Aftoyuma() {
-  const [data, setData] = useState([]);
   const [secilenIl, setSecilenIl] = useState(cariIl);
-  const [secilenAy, setSecilenAy] = useState('Bütün Aylar');
+  const [secilenAy, setSecilenAy] = useState(cariAy);
   const [vehicleEvents, setVehicleEvents] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [waterReadings, setWaterReadings] = useState([]);
   const [plateInput, setPlateInput] = useState('');
   const [direction, setDirection] = useState('entry');
+  const [expenseForm, setExpenseForm] = useState({
+    expenseDate: localDateKey(new Date()),
+    title: '',
+    amount: '',
+    note: '',
+  });
+  const [waterForm, setWaterForm] = useState({
+    il: cariIl,
+    ay: cariAy,
+    oldReading: '',
+    newReading: '',
+    pricePerUnit: '1',
+  });
 
-  useEffect(() => {
-    const fetchAftoyumaData = async () => {
-      try {
-        const reports = await reportsApi.list({ il: secilenIl });
-        setData(reports.filter((item) => String(item.ev).trim() === 'MOYKA'));
-      } catch (error) {
-        console.error('Backend-dən məlumat alınarkən xəta:', error.message);
-      }
-    };
+  const loadAll = useCallback(async () => {
+    const [events, expenseRows, waterRows] = await Promise.all([
+      vehicleEventsApi.list(),
+      washExpensesApi.list({ il: secilenIl }),
+      washWaterApi.list({ il: secilenIl }),
+    ]);
 
-    fetchAftoyumaData();
+    setVehicleEvents(events);
+    setExpenses(expenseRows);
+    setWaterReadings(waterRows);
   }, [secilenIl]);
 
   useEffect(() => {
-    const loadEvents = async () => {
-      try {
-        const events = await vehicleEventsApi.list();
-        setVehicleEvents(events);
-      } catch (error) {
-        console.error('Maşın qeydiyyatı alınarkən xəta:', error.message);
-      }
-    };
+    loadAll().catch((error) => console.error('Aftoyuma məlumatları alınmadı:', error.message));
+  }, [loadAll]);
 
-    loadEvents();
-  }, []);
+  useEffect(() => {
+    const previous = findPreviousReading(waterReadings, waterForm.il, waterForm.ay);
+    setWaterForm((prev) => ({
+      ...prev,
+      oldReading: previous ? String(previous.newReading) : prev.oldReading,
+    }));
+  }, [waterReadings, waterForm.il, waterForm.ay]);
 
-  const filteredData = useMemo(() => {
-    if (secilenAy === 'Bütün Aylar') return data;
-    return data.filter((item) => String(item.ay).trim() === secilenAy);
-  }, [data, secilenAy]);
+  const filteredEvents = useMemo(
+    () => vehicleEvents.filter((item) => eventMatches(item, secilenIl, secilenAy) && item.direction === 'entry'),
+    [vehicleEvents, secilenIl, secilenAy],
+  );
+  const todayEvents = useMemo(
+    () => vehicleEvents.filter((item) => localDateKey(new Date(item.createdAt)) === localDateKey(new Date()) && item.direction === 'entry'),
+    [vehicleEvents],
+  );
+  const filteredExpenses = useMemo(
+    () => expenses.filter((item) => expenseMatches(item, secilenIl, secilenAy)),
+    [expenses, secilenIl, secilenAy],
+  );
+  const filteredWater = useMemo(
+    () => waterReadings.filter((item) => Number(item.il) === Number(secilenIl) && item.ay === secilenAy),
+    [waterReadings, secilenIl, secilenAy],
+  );
 
-  const cemSerfiyyat = filteredData.reduce((sum, item) => sum + toAmount(item.serfiyyat), 0);
-  const cemIsiqPulu = filteredData.reduce((sum, item) => sum + toAmount(item.isiqPulu), 0);
-  const umumiCem = filteredData.reduce((sum, item) => sum + toAmount(item.total), 0);
-  const todayKey = localDateKey(new Date());
-  const dailyEvents = vehicleEvents.filter((item) => localDateKey(new Date(item.createdAt)) === todayKey);
+  const monthlyExpenseTotal = filteredExpenses.reduce((sum, item) => sum + toAmount(item.amount), 0);
+  const monthlyWaterTotal = filteredWater.reduce((sum, item) => sum + toAmount(item.total), 0);
+  const monthlyWaterUsage = filteredWater.reduce((sum, item) => sum + toAmount(item.usageAmount), 0);
+  const lastPlate = todayEvents[0]?.plate || '-';
 
   const handleSavePlate = async (e) => {
     e.preventDefault();
@@ -56,126 +79,189 @@ function Aftoyuma() {
     try {
       await vehicleEventsApi.create({ plate, direction, source: 'manual' });
       setPlateInput('');
-      const events = await vehicleEventsApi.list();
-      setVehicleEvents(events);
+      await loadAll();
     } catch (error) {
-      console.error('Nömrə qeyd edilərkən xəta:', error.message);
-      alert('Nömrə yadda saxlanmadı.');
+      alert(`Nömrə yadda saxlanmadı: ${error.message}`);
+    }
+  };
+
+  const handleSaveExpense = async (e) => {
+    e.preventDefault();
+
+    try {
+      await washExpensesApi.create(expenseForm);
+      setExpenseForm((prev) => ({ ...prev, title: '', amount: '', note: '' }));
+      await loadAll();
+    } catch (error) {
+      alert(`Xərc yadda saxlanmadı: ${error.message}`);
+    }
+  };
+
+  const handleSaveWater = async (e) => {
+    e.preventDefault();
+
+    try {
+      await washWaterApi.create(waterForm);
+      setWaterForm((prev) => ({ ...prev, newReading: '' }));
+      await loadAll();
+    } catch (error) {
+      alert(`Su göstəricisi yadda saxlanmadı: ${error.message}`);
     }
   };
 
   return (
-    <div style={{ padding: '15px', maxWidth: '760px', margin: '0 auto', color: theme.colors.text }}>
-      <div style={{ backgroundColor: theme.colors.surface, padding: '15px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}`, marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'end' }}>
+    <div style={wrap}>
+      <header style={header}>
         <div>
-          <h2 style={{ margin: 0, color: theme.colors.text, fontSize: '18px', fontWeight: '700' }}>Aftoyuma</h2>
-          <div style={{ marginTop: '4px', color: theme.colors.muted, fontSize: '12px' }}>Günlük maşın sayı, nömrə qeydiyyatı və işıq sərfiyyatı</div>
+          <h2 style={title}>Aftoyuma</h2>
+          <div style={sub}>Maşın sayı, xərclər və su göstəricisi</div>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <div>
-            <label style={labelStyle}>İl</label>
+        <div style={filterRow}>
+          <Field label="İl">
             <input type="number" min="2020" max="2100" value={secilenIl} onChange={(e) => setSecilenIl(e.target.value)} list="aftoyuma-iller" style={controlStyle} />
             <datalist id="aftoyuma-iller">
               {getYearOptions(secilenIl).map((il) => <option key={il} value={il} />)}
             </datalist>
-          </div>
-          <div>
-            <label style={labelStyle}>Ay</label>
+          </Field>
+          <Field label="Ay">
             <select value={secilenAy} onChange={(e) => setSecilenAy(e.target.value)} style={controlStyle}>
-              <option value="Bütün Aylar">Bütün Aylar</option>
               {aylar.map((ay) => <option key={ay} value={ay}>{ay}</option>)}
             </select>
-          </div>
+          </Field>
         </div>
-      </div>
+      </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', marginBottom: '15px' }}>
-        <Summary title="Xalis sərfiyyat" value={`${cemSerfiyyat.toFixed(2)} Kwt`} color="#334155" />
-        <Summary title="İşıq pulu" value={formatMoney(cemIsiqPulu)} color="#e84118" />
-        <Summary title="Yekun total" value={formatMoney(umumiCem)} color="#20bf6b" />
-      </div>
+      <section style={summaryGrid}>
+        <Summary title="Bugünkü maşın" value={`${todayEvents.length}`} color={theme.colors.text} />
+        <Summary title={`${secilenAy} maşın`} value={`${filteredEvents.length}`} color={theme.colors.primary} />
+        <Summary title="Aylıq xərclər" value={formatMoney(monthlyExpenseTotal)} color={theme.colors.wash} />
+        <Summary title="Su pulu" value={formatMoney(monthlyWaterTotal)} color={theme.colors.teal} />
+      </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '15px' }}>
-        <Summary title="Günlük maşın sayı" value={`${dailyEvents.length}`} color="#0f172a" />
-        <Summary title="Son nömrə" value={dailyEvents[0]?.plate || '-'} color="#4b7bec" />
-      </div>
+      <section style={grid}>
+        <Panel title="Maşın qeydiyyatı">
+          <form onSubmit={handleSavePlate} style={formGrid}>
+            <Field label="Nömrə">
+              <input value={plateInput} onChange={(e) => setPlateInput(e.target.value)} placeholder="10AA001" style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="İstiqamət">
+              <select value={direction} onChange={(e) => setDirection(e.target.value)} style={{ ...controlStyle, width: '100%' }}>
+                <option value="entry">Giriş</option>
+                <option value="exit">Çıxış</option>
+              </select>
+            </Field>
+            <button type="submit" style={button}>Qeyd et</button>
+          </form>
+          <MetricRow label="Son nömrə" value={lastPlate} />
+        </Panel>
 
-      <div style={{ background: theme.colors.surface, padding: '15px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}`, marginBottom: '15px' }}>
-        <h3 style={{ margin: '0 0 8px', color: theme.colors.text, fontSize: '16px' }}>Kamera və nömrə qutusu</h3>
-        <div style={{ color: theme.colors.muted, fontSize: '12px', marginBottom: '12px' }}>
-          Dahua IPC-HFW2441T-ZS kameradan gələn görüntü sonradan OCR üçün eyni qutuya yazılacaq. Hazırda manual nömrə əlavə olunur.
-        </div>
-        <form onSubmit={handleSavePlate} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px', alignItems: 'end' }}>
-          <div>
-            <label style={labelStyle}>Nömrə</label>
-            <input value={plateInput} onChange={(e) => setPlateInput(e.target.value)} placeholder="10AA001" style={{ ...controlStyle, width: '100%' }} />
-          </div>
-          <div>
-            <label style={labelStyle}>İstiqamət</label>
-            <select value={direction} onChange={(e) => setDirection(e.target.value)} style={controlStyle}>
-              <option value="entry">Giriş</option>
-              <option value="exit">Çıxış</option>
-            </select>
-          </div>
-          <button type="submit" style={{ ...controlStyle, background: theme.colors.text, color: '#fff', border: 'none', cursor: 'pointer', width: '100%' }}>Qeyd et</button>
-        </form>
-      </div>
+        <Panel title="Xərc əlavə et">
+          <form onSubmit={handleSaveExpense} style={formGrid}>
+            <Field label="Tarix">
+              <input type="date" value={expenseForm.expenseDate} onChange={(e) => setExpenseForm((prev) => ({ ...prev, expenseDate: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Xərc adı">
+              <input value={expenseForm.title} onChange={(e) => setExpenseForm((prev) => ({ ...prev, title: e.target.value }))} placeholder="Dərman, təkər qaraldan..." style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Məbləğ">
+              <input type="number" step="any" value={expenseForm.amount} onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Qeyd">
+              <input value={expenseForm.note} onChange={(e) => setExpenseForm((prev) => ({ ...prev, note: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <button type="submit" style={button}>Xərci saxla</button>
+          </form>
+        </Panel>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {filteredData.length === 0 ? (
-          <div style={{ padding: '30px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surface, borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}` }}>
-            Məlumat tapılmadı.
-          </div>
-        ) : (
-          filteredData.map((item) => (
-            <div key={`${item.il}-${item.ay}-${item.ev}`} style={{ background: theme.colors.surface, borderRadius: theme.radius.md, padding: '15px', border: `1px solid ${theme.colors.border}` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px', marginBottom: '10px' }}>
-                <span style={{ fontWeight: '700', color: theme.colors.text, fontSize: '15px' }}>{item.il} / {item.ay}</span>
-                <span style={{ background: '#fef2f2', color: theme.colors.wash, padding: '4px 10px', borderRadius: theme.radius.pill, fontSize: '12px', fontWeight: '700' }}>{item.ev}</span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px', color: theme.colors.muted }}>
-                <Metric label="Köhnə İşıq" value={item.kohneIsiq} />
-                <Metric label="Yeni İşıq" value={item.yeniIsiq} />
-                <Metric label="Xalis Sərfiyyat" value={`${item.serfiyyat} Kwt`} />
-                <Metric label="İşıq Pulu" value={formatMoney(item.isiqPulu)} color="#e84118" />
-              </div>
-              <div style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>Yekun ödəniş</span>
-                <span style={{ fontSize: '16px', fontWeight: '700', color: theme.colors.wash }}>{formatMoney(item.total)}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+        <Panel title="Su göstəricisi">
+          <form onSubmit={handleSaveWater} style={formGrid}>
+            <Field label="İl">
+              <input type="number" value={waterForm.il} onChange={(e) => setWaterForm((prev) => ({ ...prev, il: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Ay">
+              <select value={waterForm.ay} onChange={(e) => setWaterForm((prev) => ({ ...prev, ay: e.target.value }))} style={{ ...controlStyle, width: '100%' }}>
+                {aylar.map((ay) => <option key={ay} value={ay}>{ay}</option>)}
+              </select>
+            </Field>
+            <Field label="Köhnə">
+              <input type="number" step="any" value={waterForm.oldReading} onChange={(e) => setWaterForm((prev) => ({ ...prev, oldReading: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Yeni">
+              <input type="number" step="any" value={waterForm.newReading} onChange={(e) => setWaterForm((prev) => ({ ...prev, newReading: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Qiymət">
+              <input type="number" step="any" value={waterForm.pricePerUnit} onChange={(e) => setWaterForm((prev) => ({ ...prev, pricePerUnit: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <button type="submit" style={button}>Su göstəricisini saxla</button>
+          </form>
+          <MetricRow label="Aylıq sərfiyyat" value={`${monthlyWaterUsage.toFixed(2)} kub`} />
+        </Panel>
+      </section>
 
-      <div style={{ background: theme.colors.surface, padding: '15px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}`, marginTop: '15px' }}>
-        <h3 style={{ margin: '0 0 10px', color: theme.colors.text, fontSize: '16px' }}>Bugünkü qeydlər</h3>
-        {dailyEvents.length === 0 ? (
-          <div style={{ padding: '18px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surfaceSoft, borderRadius: theme.radius.md }}>Hələ maşın qeydi yoxdur.</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc' }}>
-                  {['Vaxt', 'Nömrə', 'İstiqamət', 'Mənbə'].map((x) => <th key={x} style={tableHead}>{x}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {dailyEvents.map((item) => (
-                  <tr key={item.id} style={{ background: '#fff' }}>
-                    <td style={tableCell}>{new Date(item.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}</td>
-                    <td style={tableCell}>{item.plate}</td>
-                    <td style={tableCell}>{item.direction === 'entry' ? 'Giriş' : 'Çıxış'}</td>
-                    <td style={tableCell}>{item.source}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <section style={grid}>
+        <Panel title={`${secilenAy} xərcləri`}>
+          <SimpleTable
+            rows={filteredExpenses}
+            empty="Bu ay xərc yoxdur."
+            columns={[
+              ['Tarix', (item) => formatDate(item.expenseDate)],
+              ['Xərc', (item) => item.title],
+              ['Məbləğ', (item) => formatMoney(item.amount)],
+              ['Qeyd', (item) => item.note || '-'],
+            ]}
+          />
+        </Panel>
+
+        <Panel title={`${secilenAy} maşın qeydləri`}>
+          <SimpleTable
+            rows={filteredEvents.slice(0, 20)}
+            empty="Bu ay maşın qeydi yoxdur."
+            columns={[
+              ['Vaxt', (item) => formatDateTime(item.createdAt)],
+              ['Nömrə', (item) => item.plate],
+              ['Mənbə', (item) => item.source],
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Su tarixçəsi">
+          <SimpleTable
+            rows={filteredWater}
+            empty="Bu ay su göstəricisi yoxdur."
+            columns={[
+              ['Ay', (item) => `${item.il} / ${item.ay}`],
+              ['Köhnə', (item) => item.oldReading.toFixed(2)],
+              ['Yeni', (item) => item.newReading.toFixed(2)],
+              ['Sərfiyyat', (item) => item.usageAmount.toFixed(2)],
+              ['Total', (item) => formatMoney(item.total)],
+            ]}
+          />
+        </Panel>
+      </section>
     </div>
   );
+}
+
+function eventMatches(item, il, ay) {
+  const date = new Date(item.createdAt);
+  return date.getFullYear() === Number(il) && aylar[date.getMonth()] === ay;
+}
+
+function expenseMatches(item, il, ay) {
+  const date = new Date(item.expenseDate);
+  return date.getFullYear() === Number(il) && aylar[date.getMonth()] === ay;
+}
+
+function findPreviousReading(readings, il, ay) {
+  const currentIndex = aylar.indexOf(ay);
+  if (currentIndex === -1) return null;
+
+  const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
+  const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
+
+  return readings
+    .filter((item) => Number(item.il) === previousIl && item.ay === previousAy)
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
 }
 
 function localDateKey(date) {
@@ -185,53 +271,93 @@ function localDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
-function Summary({ title, value, color }) {
-  return (
-    <div style={{ background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '12px' }}>
-      <div style={{ color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{title}</div>
-      <div style={{ color, fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{value}</div>
-    </div>
-  );
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('az-AZ');
 }
 
-function Metric({ label, value, color = '#334155' }) {
+function formatDateTime(value) {
+  return new Date(value).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function Field({ label, children }) {
   return (
     <div>
-      {label}: <strong style={{ color }}>{value}</strong>
+      <label style={labelStyle}>{label}</label>
+      {children}
     </div>
   );
 }
 
-const labelStyle = {
-  display: 'block',
-  color: theme.colors.muted,
-  fontSize: '12px',
-  fontWeight: 700,
-  marginBottom: '5px',
-};
+function Panel({ title, children }) {
+  return (
+    <section style={panel}>
+      <h3 style={panelTitle}>{title}</h3>
+      {children}
+    </section>
+  );
+}
 
-const controlStyle = {
-  width: '130px',
-  padding: '10px',
-  borderRadius: '7px',
-  border: `1px solid ${theme.colors.border}`,
-  background: '#fff',
-  fontSize: '14px',
-  boxSizing: 'border-box',
-};
+function Summary({ title, value, color }) {
+  return (
+    <div style={summary}>
+      <div style={{ color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{title}</div>
+      <div style={{ color, fontSize: '21px', fontWeight: 900, marginTop: '6px' }}>{value}</div>
+    </div>
+  );
+}
 
-const tableHead = {
-  textAlign: 'left',
-  padding: '10px 8px',
-  borderBottom: `1px solid ${theme.colors.border}`,
-  color: '#475569',
-};
+function MetricRow({ label, value }) {
+  return (
+    <div style={metricRow}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
 
-const tableCell = {
-  padding: '10px 8px',
-  borderBottom: '1px solid #eef2f7',
-  color: '#0f172a',
-  whiteSpace: 'nowrap',
-};
+function SimpleTable({ rows, columns, empty }) {
+  if (!rows.length) {
+    return <div style={emptyStyle}>{empty}</div>;
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={table}>
+        <thead>
+          <tr>
+            {columns.map(([label]) => <th key={label} style={tableHead}>{label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.id}-${index}`}>
+              {columns.map(([label, accessor]) => <td key={label} style={tableCell}>{accessor(row)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const wrap = { padding: '15px', maxWidth: '1180px', margin: '0 auto', color: theme.colors.text };
+const header = { background: theme.colors.surface, padding: '15px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}`, marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'end' };
+const title = { margin: 0, color: theme.colors.text, fontSize: '20px', fontWeight: 800 };
+const sub = { marginTop: '4px', color: theme.colors.muted, fontSize: '12px' };
+const filterRow = { display: 'flex', gap: '10px', flexWrap: 'wrap' };
+const summaryGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', marginBottom: '15px' };
+const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px', marginBottom: '15px' };
+const panel = { background: theme.colors.surface, padding: '15px', borderRadius: theme.radius.md, border: `1px solid ${theme.colors.border}` };
+const panelTitle = { margin: '0 0 12px', color: theme.colors.text, fontSize: '16px' };
+const summary = { background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '12px' };
+const formGrid = { display: 'grid', gap: '10px' };
+const metricRow = { display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '12px', padding: '10px', borderRadius: theme.radius.sm, background: theme.colors.surfaceSoft, color: theme.colors.muted, fontSize: '13px' };
+const labelStyle = { display: 'block', color: theme.colors.muted, fontSize: '12px', fontWeight: 700, marginBottom: '5px' };
+const controlStyle = { width: '130px', padding: '10px', borderRadius: '7px', border: `1px solid ${theme.colors.border}`, background: '#fff', fontSize: '14px', boxSizing: 'border-box' };
+const button = { padding: '11px', borderRadius: '7px', border: 'none', background: theme.colors.text, color: '#fff', cursor: 'pointer', fontWeight: 800 };
+const emptyStyle = { padding: '22px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surfaceSoft, borderRadius: theme.radius.md };
+const table = { width: '100%', borderCollapse: 'collapse', fontSize: '12px' };
+const tableHead = { textAlign: 'left', padding: '10px 8px', borderBottom: `1px solid ${theme.colors.border}`, color: '#475569', background: '#f8fafc' };
+const tableCell = { padding: '10px 8px', borderBottom: '1px solid #eef2f7', color: '#0f172a', whiteSpace: 'nowrap' };
 
 export default Aftoyuma;

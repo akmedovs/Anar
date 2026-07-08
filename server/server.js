@@ -51,6 +51,27 @@ async function initDb() {
       image_url TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS wash_expenses (
+      id SERIAL PRIMARY KEY,
+      expense_date DATE NOT NULL,
+      title TEXT NOT NULL,
+      amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS wash_water_readings (
+      id SERIAL PRIMARY KEY,
+      il INTEGER NOT NULL,
+      ay TEXT NOT NULL,
+      old_reading NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      new_reading NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      price_per_unit NUMERIC(12, 2) NOT NULL DEFAULT 1,
+      usage_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   await pool.query('ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_il_ay_ev_key');
@@ -107,6 +128,31 @@ function eventFromRow(row) {
   };
 }
 
+function expenseFromRow(row) {
+  return {
+    id: row.id,
+    expenseDate: row.expense_date,
+    title: row.title,
+    amount: toNumber(row.amount),
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+function waterReadingFromRow(row) {
+  return {
+    id: row.id,
+    il: Number(row.il),
+    ay: row.ay,
+    oldReading: toNumber(row.old_reading),
+    newReading: toNumber(row.new_reading),
+    pricePerUnit: toNumber(row.price_per_unit),
+    usageAmount: toNumber(row.usage_amount),
+    total: toNumber(row.total),
+    createdAt: row.created_at,
+  };
+}
+
 function normalizeReport(input) {
   const il = Number(input.il) || new Date().getFullYear();
   const ay = String(input.ay || '').trim();
@@ -140,6 +186,49 @@ function normalizeVehicleEvent(input) {
     source: input.source || 'manual',
     confidence: input.confidence === undefined || input.confidence === '' ? null : Number(input.confidence),
     imageUrl: input.imageUrl || '',
+  };
+}
+
+function normalizeExpense(input) {
+  const expenseDate = String(input.expenseDate || '').trim();
+  const title = String(input.title || '').trim();
+
+  if (!expenseDate || !title) {
+    const error = new Error('Tarix və xərc adı mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    expenseDate,
+    title,
+    amount: toNumber(input.amount),
+    note: String(input.note || '').trim(),
+  };
+}
+
+function normalizeWaterReading(input) {
+  const il = Number(input.il) || new Date().getFullYear();
+  const ay = String(input.ay || '').trim();
+  const oldReading = toNumber(input.oldReading);
+  const newReading = toNumber(input.newReading);
+  const pricePerUnit = Number(input.pricePerUnit) || 1;
+  const usageAmount = Math.max(0, newReading - oldReading);
+
+  if (!ay) {
+    const error = new Error('Su göstəricisi üçün ay mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    il,
+    ay,
+    oldReading,
+    newReading,
+    pricePerUnit,
+    usageAmount,
+    total: Number((usageAmount * pricePerUnit).toFixed(2)),
   };
 }
 
@@ -232,6 +321,103 @@ async function createVehicleEvent(input) {
   return eventFromRow(result.rows[0]);
 }
 
+async function listWashExpenses(url) {
+  const where = [];
+  const values = [];
+
+  if (url.searchParams.get('il')) {
+    values.push(Number(url.searchParams.get('il')));
+    where.push(`EXTRACT(YEAR FROM expense_date) = $${values.length}`);
+  }
+
+  if (url.searchParams.get('ay')) {
+    const monthIndex = monthOrder.indexOf(url.searchParams.get('ay')) + 1;
+    if (monthIndex > 0) {
+      values.push(monthIndex);
+      where.push(`EXTRACT(MONTH FROM expense_date) = $${values.length}`);
+    }
+  }
+
+  const result = await pool.query(
+    `
+      SELECT *
+      FROM wash_expenses
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY expense_date DESC, id DESC
+      LIMIT 1000
+    `,
+    values,
+  );
+
+  return result.rows.map(expenseFromRow);
+}
+
+async function createWashExpense(input) {
+  const expense = normalizeExpense(input);
+  const result = await pool.query(
+    `
+      INSERT INTO wash_expenses (expense_date, title, amount, note)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `,
+    [expense.expenseDate, expense.title, expense.amount, expense.note],
+  );
+
+  return expenseFromRow(result.rows[0]);
+}
+
+async function listWaterReadings(url) {
+  const where = [];
+  const values = [];
+
+  if (url.searchParams.get('il')) {
+    values.push(Number(url.searchParams.get('il')));
+    where.push(`il = $${values.length}`);
+  }
+
+  if (url.searchParams.get('ay')) {
+    values.push(url.searchParams.get('ay'));
+    where.push(`ay = $${values.length}`);
+  }
+
+  const result = await pool.query(
+    `
+      SELECT *
+      FROM wash_water_readings
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY il DESC, array_position($${values.length + 1}::text[], ay), id DESC
+      LIMIT 1000
+    `,
+    [...values, monthOrder],
+  );
+
+  return result.rows.map(waterReadingFromRow);
+}
+
+async function createWaterReading(input) {
+  const reading = normalizeWaterReading(input);
+  const result = await pool.query(
+    `
+      INSERT INTO wash_water_readings (
+        il, ay, old_reading, new_reading, price_per_unit, usage_amount, total
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `,
+    [
+      reading.il,
+      reading.ay,
+      reading.oldReading,
+      reading.newReading,
+      reading.pricePerUnit,
+      reading.usageAmount,
+      reading.total,
+    ],
+  );
+
+  return waterReadingFromRow(result.rows[0]);
+}
+
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -268,6 +454,26 @@ async function handleRequest(req, res) {
 
   if (url.pathname === '/api/vehicle-events' && req.method === 'POST') {
     sendJson(res, 201, await createVehicleEvent(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/wash-expenses' && req.method === 'GET') {
+    sendJson(res, 200, await listWashExpenses(url));
+    return;
+  }
+
+  if (url.pathname === '/api/wash-expenses' && req.method === 'POST') {
+    sendJson(res, 201, await createWashExpense(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/wash-water-readings' && req.method === 'GET') {
+    sendJson(res, 200, await listWaterReadings(url));
+    return;
+  }
+
+  if (url.pathname === '/api/wash-water-readings' && req.method === 'POST') {
+    sendJson(res, 201, await createWaterReading(await readJson(req)));
     return;
   }
 

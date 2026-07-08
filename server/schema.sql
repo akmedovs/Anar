@@ -23,3 +23,24 @@ CREATE TABLE IF NOT EXISTS vehicle_events (
   image_url TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS wash_expenses (
+  id SERIAL PRIMARY KEY,
+  expense_date DATE NOT NULL,
+  title TEXT NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS wash_water_readings (
+  id SERIAL PRIMARY KEY,
+  il INTEGER NOT NULL,
+  ay TEXT NOT NULL,
+  old_reading NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  new_reading NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  price_per_unit NUMERIC(12, 2) NOT NULL DEFAULT 1,
+  usage_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

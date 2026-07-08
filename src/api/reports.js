@@ -66,3 +66,39 @@ export const vehicleEventsApi = {
     });
   },
 };
+
+export const washExpensesApi = {
+  list(filters = {}) {
+    const params = new URLSearchParams();
+
+    if (filters.il) params.set('il', filters.il);
+    if (filters.ay && filters.ay !== 'Bütün Aylar') params.set('ay', filters.ay);
+
+    const query = params.toString();
+    return request(`/api/wash-expenses${query ? `?${query}` : ''}`);
+  },
+  create(expense) {
+    return request('/api/wash-expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    });
+  },
+};
+
+export const washWaterApi = {
+  list(filters = {}) {
+    const params = new URLSearchParams();
+
+    if (filters.il) params.set('il', filters.il);
+    if (filters.ay && filters.ay !== 'Bütün Aylar') params.set('ay', filters.ay);
+
+    const query = params.toString();
+    return request(`/api/wash-water-readings${query ? `?${query}` : ''}`);
+  },
+  create(reading) {
+    return request('/api/wash-water-readings', {
+      method: 'POST',
+      body: JSON.stringify(reading),
+    });
+  },
+};

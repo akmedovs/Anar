@@ -123,6 +123,8 @@ Backend start olanda bu cədvəlləri avtomatik yaradır:
 
 - `reports`
 - `vehicle_events`
+- `wash_expenses`
+- `wash_water_readings`
 
 Manual yaratmaq lazımdırsa:
 
@@ -298,6 +300,24 @@ Aftoyuma eventləri:
 ```bash
 GET /api/vehicle-events
 POST /api/vehicle-events
+```
+
+Aftoyuma xərcləri:
+
+```bash
+GET /api/wash-expenses
+GET /api/wash-expenses?il=2026
+GET /api/wash-expenses?il=2026&ay=İyul
+POST /api/wash-expenses
+```
+
+Aftoyuma su göstəriciləri:
+
+```bash
+GET /api/wash-water-readings
+GET /api/wash-water-readings?il=2026
+GET /api/wash-water-readings?il=2026&ay=İyul
+POST /api/wash-water-readings
 ```
 
 ## Deploy Yoxlama Siyahısı

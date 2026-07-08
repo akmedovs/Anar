@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { reportsApi } from '../../api/reports';
+import { reportsApi, vehicleEventsApi, washExpensesApi, washWaterApi } from '../../api/reports';
 import { aylar, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
@@ -9,6 +9,9 @@ function Home() {
   const [secilenAy, setSecilenAy] = useState('Bütün Aylar');
   const [secilenBaxis, setSecilenBaxis] = useState('all');
   const [error, setError] = useState('');
+  const [vehicleEvents, setVehicleEvents] = useState([]);
+  const [washExpenses, setWashExpenses] = useState([]);
+  const [waterReadings, setWaterReadings] = useState([]);
 
   useEffect(() => {
     const fetchHomeData = async () => {
@@ -23,6 +26,25 @@ function Home() {
     };
 
     fetchHomeData();
+  }, [secilenIl]);
+
+  useEffect(() => {
+    const fetchWashData = async () => {
+      try {
+        const [events, expenses, readings] = await Promise.all([
+          vehicleEventsApi.list(),
+          washExpensesApi.list({ il: secilenIl }),
+          washWaterApi.list({ il: secilenIl }),
+        ]);
+        setVehicleEvents(events);
+        setWashExpenses(expenses);
+        setWaterReadings(readings);
+      } catch (err) {
+        console.error('Aftoyuma dashboard məlumatları alınmadı:', err.message);
+      }
+    };
+
+    fetchWashData();
   }, [secilenIl]);
 
   const filtered = useMemo(() => {
@@ -76,6 +98,10 @@ function Home() {
 
   const bestMonth = monthlyTrend.reduce((best, item) => (item.value > best.value ? item : best), { label: '-', value: 0 });
   const averageMonth = monthlyTrend.length ? monthlyTrend.reduce((sum, item) => sum + item.value, 0) / monthlyTrend.length : 0;
+  const washDashboard = useMemo(
+    () => buildWashDashboard(vehicleEvents, washExpenses, waterReadings, secilenIl, secilenAy),
+    [vehicleEvents, washExpenses, waterReadings, secilenIl, secilenAy],
+  );
 
   return (
     <div style={wrap}>
@@ -111,47 +137,62 @@ function Home() {
       {error && <div style={alert}>Backend baglantisi aktiv deyil: {error}</div>}
 
       <section style={kpiGrid}>
-        <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
-        {secilenBaxis !== 'wash' && <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />}
-        {secilenBaxis !== 'rent' && <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />}
-        <Kpi title="Ayliq orta" value={formatMoney(averageMonth)} note={`En yaxsi: ${bestMonth.label}`} color={theme.colors.teal} />
-      </section>
-
-      <section style={mainGrid}>
-        <Panel title={`${secilenIl} ayliq trend`} wide>
-          <ColumnChart data={monthlyTrend} />
-        </Panel>
-
-        <Panel title="Gelir payi">
-          <Donut segments={buildRevenueSegments(secilenBaxis, rentTotals, washTotals)} total={totals.total} />
-        </Panel>
-
-        <Panel title="Xerc ve gelir terkibi">
-          <StackList data={composition} total={Math.max(totals.kiraye + totals.isiq + totals.su + totals.wifi, 1)} />
-        </Panel>
-
-        {secilenBaxis !== 'wash' && (
-          <Panel title="Evler uzre ranking">
-            <Ranking data={houseTotals} />
-          </Panel>
+        {secilenBaxis === 'wash' ? (
+          <>
+            <Kpi title="Bugunku masin" value={`${washDashboard.todayCount}`} note="giris qeydi" color={theme.colors.text} />
+            <Kpi title={secilenAy === 'Bütün Aylar' ? 'Illik masin' : `${secilenAy} masin`} value={`${washDashboard.periodCount}`} note={`${secilenIl}`} color={theme.colors.primary} />
+            <Kpi title="En cox masin" value={washDashboard.bestMonth.label} note={`${washDashboard.bestMonth.value} masin`} color={theme.colors.teal} />
+            <Kpi title="Xercler" value={formatMoney(washDashboard.expenseTotal)} note="secilen dovr" color={theme.colors.wash} />
+          </>
+        ) : (
+          <>
+            <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
+            <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />
+            {secilenBaxis !== 'rent' && <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />}
+            <Kpi title="Ayliq orta" value={formatMoney(averageMonth)} note={`En yaxsi: ${bestMonth.label}`} color={theme.colors.teal} />
+          </>
         )}
       </section>
 
-      <section style={detailGrid}>
-        <Panel title="Operativ xulase">
-          <div style={metricRows}>
-            {secilenBaxis !== 'wash' && <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />}
-            <Metric label="Isiq pulu" value={formatMoney(totals.isiq)} />
-            {secilenBaxis !== 'wash' && <Metric label="Su" value={formatMoney(totals.su)} />}
-            {secilenBaxis !== 'wash' && <Metric label="Internet" value={formatMoney(totals.wifi)} />}
-            <Metric label="Serfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} />
-          </div>
-        </Panel>
+      {secilenBaxis === 'wash' ? (
+        <WashDashboard data={washDashboard} secilenIl={secilenIl} />
+      ) : (
+        <>
+          <section style={mainGrid}>
+            <Panel title={`${secilenIl} ayliq trend`} wide>
+              <ColumnChart data={monthlyTrend} />
+            </Panel>
 
-        <Panel title="Son hesabatlar" wide>
-          <DataTable rows={filtered.slice(0, 12)} view={secilenBaxis} />
-        </Panel>
-      </section>
+            <Panel title="Gelir payi">
+              <Donut segments={buildRevenueSegments(secilenBaxis, rentTotals, washTotals)} total={totals.total} />
+            </Panel>
+
+            <Panel title="Xerc ve gelir terkibi">
+              <StackList data={composition} total={Math.max(totals.kiraye + totals.isiq + totals.su + totals.wifi, 1)} />
+            </Panel>
+
+          <Panel title="Evler uzre ranking">
+            <Ranking data={houseTotals} />
+          </Panel>
+          </section>
+
+          <section style={detailGrid}>
+            <Panel title="Operativ xulase">
+              <div style={metricRows}>
+                <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />
+                <Metric label="Isiq pulu" value={formatMoney(totals.isiq)} />
+                <Metric label="Su" value={formatMoney(totals.su)} />
+                <Metric label="Internet" value={formatMoney(totals.wifi)} />
+                <Metric label="Serfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} />
+              </div>
+            </Panel>
+
+            <Panel title="Son hesabatlar" wide>
+              <DataTable rows={filtered.slice(0, 12)} view={secilenBaxis} />
+            </Panel>
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -173,6 +214,43 @@ function buildRevenueSegments(view, rentTotals, washTotals) {
     { label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary },
     { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
   ];
+}
+
+function buildWashDashboard(events, expenses, readings, il, ay) {
+  const entryEvents = events.filter((item) => item.direction === 'entry');
+  const todayKey = localDateKey(new Date());
+  const yearEvents = entryEvents.filter((item) => new Date(item.createdAt).getFullYear() === Number(il));
+  const periodEvents = yearEvents.filter((item) => ay === 'Bütün Aylar' || aylar[new Date(item.createdAt).getMonth()] === ay);
+  const monthCounts = aylar.map((monthName, index) => ({
+    label: monthName.slice(0, 3),
+    value: yearEvents.filter((item) => new Date(item.createdAt).getMonth() === index).length,
+  }));
+  const bestMonth = monthCounts.reduce((best, item) => (item.value > best.value ? item : best), { label: '-', value: 0 });
+  const periodExpenses = expenses.filter((item) => {
+    const date = new Date(item.expenseDate);
+    return date.getFullYear() === Number(il) && (ay === 'Bütün Aylar' || aylar[date.getMonth()] === ay);
+  });
+  const periodReadings = readings.filter((item) => Number(item.il) === Number(il) && (ay === 'Bütün Aylar' || item.ay === ay));
+
+  return {
+    todayCount: entryEvents.filter((item) => localDateKey(new Date(item.createdAt)) === todayKey).length,
+    periodCount: periodEvents.length,
+    bestMonth,
+    monthCounts,
+    expenseTotal: periodExpenses.reduce((sum, item) => sum + toAmount(item.amount), 0),
+    waterTotal: periodReadings.reduce((sum, item) => sum + toAmount(item.total), 0),
+    waterUsage: periodReadings.reduce((sum, item) => sum + toAmount(item.usageAmount), 0),
+    expenses: periodExpenses.slice(0, 12),
+    recentEvents: periodEvents.slice(0, 12),
+    readings: periodReadings.slice(0, 12),
+  };
+}
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function summarize(items) {
@@ -218,6 +296,64 @@ function Panel({ title, children, wide = false }) {
       <h2 style={panelTitle}>{title}</h2>
       {children}
     </section>
+  );
+}
+
+function WashDashboard({ data, secilenIl }) {
+  return (
+    <>
+      <section style={mainGrid}>
+        <Panel title={`${secilenIl} masin axini`} wide>
+          <ColumnChart data={data.monthCounts} />
+        </Panel>
+
+        <Panel title="Aftoyuma xerc xulasesi">
+          <div style={metricRows}>
+            <Metric label="Xercler" value={formatMoney(data.expenseTotal)} />
+            <Metric label="Su pulu" value={formatMoney(data.waterTotal)} />
+            <Metric label="Su serfiyyati" value={`${data.waterUsage.toFixed(2)} kub`} />
+            <Metric label="En aktiv ay" value={`${data.bestMonth.label} / ${data.bestMonth.value} masin`} />
+          </div>
+        </Panel>
+      </section>
+
+      <section style={detailGrid}>
+        <Panel title="Xercler" wide>
+          <MiniTable
+            rows={data.expenses}
+            columns={[
+              ['Tarix', (item) => formatDate(item.expenseDate)],
+              ['Xerc', (item) => item.title],
+              ['Mebleg', (item) => formatMoney(item.amount)],
+              ['Qeyd', (item) => item.note || '-'],
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Son masinlar">
+          <MiniTable
+            rows={data.recentEvents}
+            columns={[
+              ['Vaxt', (item) => formatDateTime(item.createdAt)],
+              ['Nomre', (item) => item.plate],
+              ['Menbe', (item) => item.source],
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Su gostericileri">
+          <MiniTable
+            rows={data.readings}
+            columns={[
+              ['Ay', (item) => `${item.il} / ${item.ay}`],
+              ['Kohne', (item) => item.oldReading.toFixed(2)],
+              ['Yeni', (item) => item.newReading.toFixed(2)],
+              ['Total', (item) => formatMoney(item.total)],
+            ]}
+          />
+        </Panel>
+      </section>
+    </>
   );
 }
 
@@ -334,6 +470,41 @@ function Legend({ color, label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function MiniTable({ rows, columns }) {
+  if (!rows.length) return <Empty />;
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={table}>
+        <thead>
+          <tr>
+            {columns.map(([label]) => (
+              <th key={label} style={th}>{label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.id}-${index}`} style={{ background: index % 2 ? '#f8fafc' : '#fff' }}>
+              {columns.map(([label, accessor]) => (
+                <td key={label} style={td}>{accessor(row)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('az-AZ');
+}
+
+function formatDateTime(value) {
+  return new Date(value).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function DataTable({ rows, view }) {
