@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 server/db.json
+.postgres-data
 
 # Editor directories and files
 .vscode/*
