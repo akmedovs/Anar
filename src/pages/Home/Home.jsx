@@ -17,6 +17,7 @@ function Home() {
         setData(await reportsApi.list({ il: secilenIl }));
       } catch (err) {
         setError(err.message);
+        setData([]);
         console.error('Backend-den melumat alinarken xeta:', err.message);
       }
     };
@@ -101,7 +102,7 @@ function Home() {
         </div>
       </header>
 
-      {error && <div style={alert}>Backend xetasi: {error}</div>}
+      {error && <div style={alert}>Backend baglantisi aktiv deyil: {error}</div>}
 
       <section style={kpiGrid}>
         <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
@@ -374,7 +375,7 @@ const sub = { margin: '5px 0 0', color: theme.colors.muted, fontSize: '13px' };
 const filters = { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'end' };
 const labelStyle = { display: 'block', color: theme.colors.muted, fontSize: '12px', fontWeight: 700, marginBottom: '5px' };
 const controlStyle = { width: '138px', padding: '10px', borderRadius: '7px', border: `1px solid ${theme.colors.border}`, background: '#fff', fontSize: '14px', boxSizing: 'border-box' };
-const alert = { padding: '12px', marginBottom: '14px', borderRadius: theme.radius.sm, background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3', fontSize: '13px' };
+const alert = { padding: '12px', marginBottom: '14px', borderRadius: theme.radius.sm, background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontSize: '13px' };
 const kpiGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '12px' };
 const kpi = { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '14px' };
 const kpiAccent = { position: 'absolute', top: 0, left: 0, width: '100%', height: '4px' };

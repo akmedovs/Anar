@@ -1,19 +1,34 @@
 async function request(path, options = {}) {
-  const response = await fetch(path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-    ...options,
-  });
+  let response;
 
-  const data = await response.json().catch(() => null);
+  try {
+    response = await fetch(path, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      ...options,
+    });
+  } catch {
+    throw new Error('Backend baglantisi yoxdur. API server ve PostgreSQL islediyine emin olun.');
+  }
+
+  const raw = await response.text().catch(() => '');
+  const data = raw ? parseJson(raw) : null;
 
   if (!response.ok) {
-    throw new Error(data?.error || 'Server sorğusu uğursuz oldu.');
+    throw new Error(data?.error || raw || `Server sorgusu ugursuz oldu. HTTP ${response.status}`);
   }
 
   return data;
+}
+
+function parseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export const reportsApi = {
