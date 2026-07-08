@@ -29,10 +29,17 @@ function AdminOnly() {
   useEffect(() => {
     const current = findLatestReport(dbData, formData.il, formData.ay, formData.ev);
     const previous = findPreviousReport(dbData, formData.il, formData.ay, formData.ev);
+    const isJanuary = aylar.indexOf(formData.ay) === 0;
 
     setFormData((prev) => ({
       ...prev,
-      kohneIsiq: current ? String(current.kohneIsiq ?? '') : previous ? String(previous.yeniIsiq ?? '') : '',
+      kohneIsiq: current
+        ? String(current.kohneIsiq ?? '')
+        : isJanuary
+          ? ''
+          : previous
+            ? String(previous.yeniIsiq ?? '')
+            : '',
       yeniIsiq: current ? String(current.yeniIsiq ?? '') : '',
       kiraye: current ? String(current.kiraye ?? '') : prev.kiraye,
       wifi: current ? String(current.wifi ?? '') : prev.wifi,
@@ -56,6 +63,11 @@ function AdminOnly() {
   }, [selectedReportKey, dbData]);
 
   const currentReports = useMemo(() => dbData.slice().sort((a, b) => Number(b.il) - Number(a.il) || aylar.indexOf(a.ay) - aylar.indexOf(b.ay)), [dbData]);
+  const selectedReport = selectedReportKey ? dbData.find((item) => keyOf(item) === selectedReportKey) : null;
+  const selectedMonthIndex = aylar.indexOf(formData.ay);
+  const isJanuary = selectedMonthIndex === 0;
+  const canEditOldMeter = !selectedReport && isJanuary;
+  const canEditNewMeter = !selectedReport || isJanuary;
 
   const handleChange = (e) => setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -116,8 +128,8 @@ function AdminOnly() {
           </Row>
           <Row>
             <Field label="Kiraye"><input type="number" name="kiraye" value={formData.kiraye} onChange={handleChange} style={control} /></Field>
-            <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} readOnly style={readOnlyControl} /></Field>
-            <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleChange} style={control} /></Field>
+            <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleChange} readOnly={!canEditOldMeter} style={canEditOldMeter ? control : readOnlyControl} /></Field>
+            <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleChange} readOnly={!canEditNewMeter} style={canEditNewMeter ? control : readOnlyControl} /></Field>
           </Row>
           <Row>
             <Field label="Su nəfər"><input type="number" name="suNefer" value={formData.suNefer} onChange={handleChange} style={control} /></Field>

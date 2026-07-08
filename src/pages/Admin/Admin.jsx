@@ -37,11 +37,19 @@ function Admin() {
 
     const currentReport = findLatestReport(dbData, formData.il, formData.ay, formData.ev);
     const previousReport = findPreviousReport(dbData, formData.il, formData.ay, formData.ev);
+    const isJanuary = secilenAyIndex === 0;
+    const hasCurrentReport = Boolean(currentReport);
 
     setFormData((prev) => ({
       ...prev,
-      kohneIsiq: currentReport ? String(currentReport.kohneIsiq ?? '') : previousReport ? String(previousReport.yeniIsiq ?? '') : '',
-      yeniIsiq: currentReport ? String(currentReport.yeniIsiq ?? '') : '',
+      kohneIsiq: hasCurrentReport
+        ? String(currentReport.kohneIsiq ?? '')
+        : isJanuary
+          ? ''
+          : previousReport
+            ? String(previousReport.yeniIsiq ?? '')
+            : '',
+      yeniIsiq: hasCurrentReport ? String(currentReport.yeniIsiq ?? '') : '',
       ...(formData.ev !== 'MOYKA'
         ? {
             kiraye: currentReport ? String(currentReport.kiraye ?? '') : ayarlar.standartKiraye,
@@ -134,6 +142,11 @@ function Admin() {
   };
 
   const isMoyka = formData.ev === 'MOYKA';
+  const selectedReport = findLatestReport(dbData, formData.il, formData.ay, formData.ev);
+  const selectedMonthIndex = aylar.indexOf(formData.ay);
+  const isJanuary = selectedMonthIndex === 0;
+  const canEditOldMeter = !selectedReport && isJanuary;
+  const canEditNewMeter = !selectedReport || isJanuary;
 
   return (
     <div style={wrap}>
@@ -189,8 +202,8 @@ function Admin() {
           <div style={infoBox(isMoyka)}>
             <span style={infoTitle(isMoyka)}>{isMoyka ? 'Aftoyuma sayğac göstəricisi' : 'İşıq sayğacı göstəricisi'}</span>
             <Row>
-              <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} readOnly required style={readOnlyInputStyle} /></Field>
-              <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleInputChange} required style={inputStyle} /></Field>
+              <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleInputChange} readOnly={!canEditOldMeter} required style={canEditOldMeter ? inputStyle : readOnlyInputStyle} /></Field>
+              <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleInputChange} readOnly={!canEditNewMeter} required style={canEditNewMeter ? inputStyle : readOnlyInputStyle} /></Field>
             </Row>
           </div>
 
