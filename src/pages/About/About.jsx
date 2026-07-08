@@ -53,10 +53,9 @@ function Aftoyuma() {
 
   useEffect(() => {
     const current = findCurrentReading(waterReadings, waterForm.il, waterForm.ay);
-    const previous = findPreviousReading(waterReadings, waterForm.il, waterForm.ay);
     setWaterForm((prev) => ({
       ...prev,
-      oldReading: current ? String(current.oldReading) : previous ? String(previous.newReading) : '',
+      oldReading: current ? String(current.oldReading) : '',
       newReading: current ? String(current.newReading) : '',
     }));
   }, [waterReadings, waterForm.il, waterForm.ay]);
@@ -347,18 +346,6 @@ function eventMatches(item, il, ay) {
 function expenseMatches(item, il, ay) {
   const date = new Date(item.expenseDate);
   return date.getFullYear() === Number(il) && aylar[date.getMonth()] === ay;
-}
-
-function findPreviousReading(readings, il, ay) {
-  const currentIndex = aylar.indexOf(ay);
-  if (currentIndex === -1) return null;
-
-  const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
-  const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
-
-  return readings
-    .filter((item) => Number(item.il) === previousIl && item.ay === previousAy)
-    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
 }
 
 function findCurrentReading(readings, il, ay) {

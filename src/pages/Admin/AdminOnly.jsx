@@ -116,7 +116,7 @@ function AdminOnly() {
           </Row>
           <Row>
             <Field label="Kiraye"><input type="number" name="kiraye" value={formData.kiraye} onChange={handleChange} style={control} /></Field>
-            <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleChange} style={control} /></Field>
+            <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} readOnly style={readOnlyControl} /></Field>
             <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleChange} style={control} /></Field>
           </Row>
           <Row>
@@ -168,6 +168,7 @@ const table = { width: '100%', borderCollapse: 'collapse', fontSize: '12px' };
 const th = { textAlign: 'left', padding: '10px 8px', borderBottom: `1px solid ${theme.colors.border}`, color: '#475569' };
 const td = { padding: '10px 8px', borderBottom: '1px solid #eef2f7', color: theme.colors.text, whiteSpace: 'nowrap' };
 const control = { width: '100%', padding: '10px', borderRadius: '7px', border: `1px solid ${theme.colors.border}`, background: '#fff', fontSize: '14px', boxSizing: 'border-box' };
+const readOnlyControl = { ...control, background: theme.colors.surfaceSoft, color: theme.colors.muted, cursor: 'not-allowed' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const Row = ({ children }) => <div style={rowStyle}>{children}</div>;
 const Field = ({ label, children }) => <div><label style={{ display: 'block', marginBottom: '5px', color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{label}</label>{children}</div>;

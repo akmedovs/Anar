@@ -189,7 +189,7 @@ function Admin() {
           <div style={infoBox(isMoyka)}>
             <span style={infoTitle(isMoyka)}>{isMoyka ? 'Aftoyuma sayğac göstəricisi' : 'İşıq sayğacı göstəricisi'}</span>
             <Row>
-              <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleInputChange} required style={inputStyle} /></Field>
+              <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} readOnly required style={readOnlyInputStyle} /></Field>
               <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleInputChange} required style={inputStyle} /></Field>
             </Row>
           </div>
@@ -269,6 +269,7 @@ const card = { background: theme.colors.surface, padding: '20px', borderRadius: 
 const sectionTitle = { margin: '0 0 15px 0', color: theme.colors.text, fontSize: '16px', borderBottom: `2px solid ${theme.colors.primary}`, paddingBottom: '8px', fontWeight: '700' };
 const labelStyle = { display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: '600', color: theme.colors.muted };
 const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${theme.colors.border}`, boxSizing: 'border-box', fontSize: '15px' };
+const readOnlyInputStyle = { ...inputStyle, background: theme.colors.surfaceSoft, color: theme.colors.muted, cursor: 'not-allowed' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const primaryButton = { width: '100%', padding: '14px', background: theme.colors.success, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', marginTop: '5px', fontSize: '14px' };
 const submitButton = { padding: '15px', background: theme.colors.primary, color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '15px', marginTop: '5px' };
