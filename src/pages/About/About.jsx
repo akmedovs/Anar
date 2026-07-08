@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { vehicleEventsApi, washExpensesApi, washWaterApi } from '../../api/reports';
+import { reportsApi, vehicleEventsApi, washExpensesApi, washWaterApi } from '../../api/reports';
 import { aylar, cariAy, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
@@ -9,6 +9,7 @@ function Aftoyuma() {
   const [vehicleEvents, setVehicleEvents] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [waterReadings, setWaterReadings] = useState([]);
+  const [electricReports, setElectricReports] = useState([]);
   const [plateInput, setPlateInput] = useState('');
   const [direction, setDirection] = useState('entry');
   const [expenseForm, setExpenseForm] = useState({
@@ -24,17 +25,26 @@ function Aftoyuma() {
     newReading: '',
     pricePerUnit: '1',
   });
+  const [electricForm, setElectricForm] = useState({
+    il: cariIl,
+    ay: cariAy,
+    oldReading: '',
+    newReading: '',
+    pricePerUnit: '0.15',
+  });
 
   const loadAll = useCallback(async () => {
-    const [events, expenseRows, waterRows] = await Promise.all([
+    const [events, expenseRows, waterRows, reports] = await Promise.all([
       vehicleEventsApi.list(),
       washExpensesApi.list({ il: secilenIl }),
       washWaterApi.list({ il: secilenIl }),
+      reportsApi.list({ il: secilenIl }),
     ]);
 
     setVehicleEvents(events);
     setExpenses(expenseRows);
     setWaterReadings(waterRows);
+    setElectricReports(reports.filter((item) => String(item.ev || '').trim().toUpperCase() === 'MOYKA'));
   }, [secilenIl]);
 
   useEffect(() => {
@@ -42,12 +52,24 @@ function Aftoyuma() {
   }, [loadAll]);
 
   useEffect(() => {
+    const current = findCurrentReading(waterReadings, waterForm.il, waterForm.ay);
     const previous = findPreviousReading(waterReadings, waterForm.il, waterForm.ay);
     setWaterForm((prev) => ({
       ...prev,
-      oldReading: previous ? String(previous.newReading) : prev.oldReading,
+      oldReading: current ? String(current.oldReading) : previous ? String(previous.newReading) : '',
+      newReading: current ? String(current.newReading) : '',
     }));
   }, [waterReadings, waterForm.il, waterForm.ay]);
+
+  useEffect(() => {
+    const current = findCurrentElectricReport(electricReports, electricForm.il, electricForm.ay);
+    const previous = findPreviousElectricReport(electricReports, electricForm.il, electricForm.ay);
+    setElectricForm((prev) => ({
+      ...prev,
+      oldReading: current ? String(current.kohneIsiq) : previous ? String(previous.yeniIsiq) : '',
+      newReading: current ? String(current.yeniIsiq) : '',
+    }));
+  }, [electricReports, electricForm.il, electricForm.ay]);
 
   const filteredEvents = useMemo(
     () => vehicleEvents.filter((item) => eventMatches(item, secilenIl, secilenAy) && item.direction === 'entry'),
@@ -65,8 +87,14 @@ function Aftoyuma() {
     () => waterReadings.filter((item) => Number(item.il) === Number(secilenIl) && item.ay === secilenAy),
     [waterReadings, secilenIl, secilenAy],
   );
+  const filteredElectric = useMemo(
+    () => electricReports.filter((item) => Number(item.il) === Number(secilenIl) && item.ay === secilenAy),
+    [electricReports, secilenIl, secilenAy],
+  );
 
   const monthlyExpenseTotal = filteredExpenses.reduce((sum, item) => sum + toAmount(item.amount), 0);
+  const monthlyElectricTotal = filteredElectric.reduce((sum, item) => sum + toAmount(item.isiqPulu), 0);
+  const monthlyElectricUsage = filteredElectric.reduce((sum, item) => sum + toAmount(item.serfiyyat), 0);
   const monthlyWaterTotal = filteredWater.reduce((sum, item) => sum + toAmount(item.total), 0);
   const monthlyWaterUsage = filteredWater.reduce((sum, item) => sum + toAmount(item.usageAmount), 0);
   const lastPlate = todayEvents[0]?.plate || '-';
@@ -109,6 +137,36 @@ function Aftoyuma() {
     }
   };
 
+  const handleSaveElectric = async (e) => {
+    e.preventDefault();
+
+    const oldReading = Number(electricForm.oldReading) || 0;
+    const newReading = Number(electricForm.newReading) || 0;
+    const pricePerUnit = Number(electricForm.pricePerUnit) || 0;
+    const usage = Math.max(0, newReading - oldReading);
+    const total = Number((usage * pricePerUnit).toFixed(2));
+
+    try {
+      await reportsApi.create({
+        il: Number(electricForm.il) || cariIl,
+        ay: electricForm.ay,
+        ev: 'MOYKA',
+        kiraye: 0,
+        kohneIsiq: oldReading,
+        yeniIsiq: newReading,
+        serfiyyat: usage,
+        isiqPulu: total,
+        suCem: 0,
+        wifi: 0,
+        total,
+      });
+      setElectricForm((prev) => ({ ...prev, newReading: '' }));
+      await loadAll();
+    } catch (error) {
+      alert(`İşıq göstəricisi yadda saxlanmadı: ${error.message}`);
+    }
+  };
+
   return (
     <div style={wrap}>
       <header style={header}>
@@ -134,6 +192,7 @@ function Aftoyuma() {
       <section style={summaryGrid}>
         <Summary title="Bugünkü maşın" value={`${todayEvents.length}`} color={theme.colors.text} />
         <Summary title={`${secilenAy} maşın`} value={`${filteredEvents.length}`} color={theme.colors.primary} />
+        <Summary title="İşıq pulu" value={formatMoney(monthlyElectricTotal)} color={theme.colors.amber} />
         <Summary title="Aylıq xərclər" value={formatMoney(monthlyExpenseTotal)} color={theme.colors.wash} />
         <Summary title="Su pulu" value={formatMoney(monthlyWaterTotal)} color={theme.colors.teal} />
       </section>
@@ -171,6 +230,30 @@ function Aftoyuma() {
             </Field>
             <button type="submit" style={button}>Xərci saxla</button>
           </form>
+        </Panel>
+
+        <Panel title="İşıq göstəricisi">
+          <form onSubmit={handleSaveElectric} style={formGrid}>
+            <Field label="İl">
+              <input type="number" value={electricForm.il} onChange={(e) => setElectricForm((prev) => ({ ...prev, il: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Ay">
+              <select value={electricForm.ay} onChange={(e) => setElectricForm((prev) => ({ ...prev, ay: e.target.value }))} style={{ ...controlStyle, width: '100%' }}>
+                {aylar.map((ay) => <option key={ay} value={ay}>{ay}</option>)}
+              </select>
+            </Field>
+            <Field label="Köhnə">
+              <input type="number" step="any" value={electricForm.oldReading} onChange={(e) => setElectricForm((prev) => ({ ...prev, oldReading: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Yeni">
+              <input type="number" step="any" value={electricForm.newReading} onChange={(e) => setElectricForm((prev) => ({ ...prev, newReading: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <Field label="Tarif">
+              <input type="number" step="any" value={electricForm.pricePerUnit} onChange={(e) => setElectricForm((prev) => ({ ...prev, pricePerUnit: e.target.value }))} style={{ ...controlStyle, width: '100%' }} />
+            </Field>
+            <button type="submit" style={button}>İşıq hesabını saxla</button>
+          </form>
+          <MetricRow label="Aylıq işıq sərfiyyatı" value={`${monthlyElectricUsage.toFixed(2)} Kwt`} />
         </Panel>
 
         <Panel title="Su göstəricisi">
@@ -224,6 +307,20 @@ function Aftoyuma() {
           />
         </Panel>
 
+        <Panel title="İşıq tarixçəsi">
+          <SimpleTable
+            rows={filteredElectric}
+            empty="Bu ay işıq göstəricisi yoxdur."
+            columns={[
+              ['Ay', (item) => `${item.il} / ${item.ay}`],
+              ['Köhnə', (item) => Number(item.kohneIsiq).toFixed(2)],
+              ['Yeni', (item) => Number(item.yeniIsiq).toFixed(2)],
+              ['Sərfiyyat', (item) => Number(item.serfiyyat).toFixed(2)],
+              ['Total', (item) => formatMoney(item.isiqPulu)],
+            ]}
+          />
+        </Panel>
+
         <Panel title="Su tarixçəsi">
           <SimpleTable
             rows={filteredWater}
@@ -260,6 +357,30 @@ function findPreviousReading(readings, il, ay) {
   const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
 
   return readings
+    .filter((item) => Number(item.il) === previousIl && item.ay === previousAy)
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+}
+
+function findCurrentReading(readings, il, ay) {
+  return readings
+    .filter((item) => Number(item.il) === Number(il) && item.ay === ay)
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+}
+
+function findCurrentElectricReport(reports, il, ay) {
+  return reports
+    .filter((item) => Number(item.il) === Number(il) && item.ay === ay)
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+}
+
+function findPreviousElectricReport(reports, il, ay) {
+  const currentIndex = aylar.indexOf(ay);
+  if (currentIndex === -1) return null;
+
+  const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
+  const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
+
+  return reports
     .filter((item) => Number(item.il) === previousIl && item.ay === previousAy)
     .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
 }

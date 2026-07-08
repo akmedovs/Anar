@@ -142,6 +142,7 @@ function Home() {
             <Kpi title="Bugunku masin" value={`${washDashboard.todayCount}`} note="giris qeydi" color={theme.colors.text} />
             <Kpi title={secilenAy === 'Bütün Aylar' ? 'Illik masin' : `${secilenAy} masin`} value={`${washDashboard.periodCount}`} note={`${secilenIl}`} color={theme.colors.primary} />
             <Kpi title="En cox masin" value={washDashboard.bestMonth.label} note={`${washDashboard.bestMonth.value} masin`} color={theme.colors.teal} />
+            <Kpi title="Isiq pulu" value={formatMoney(washTotals.isiq)} note={`${washTotals.serfiyyat.toFixed(2)} Kwt`} color={theme.colors.amber} />
             <Kpi title="Xercler" value={formatMoney(washDashboard.expenseTotal)} note="secilen dovr" color={theme.colors.wash} />
           </>
         ) : (
@@ -155,7 +156,7 @@ function Home() {
       </section>
 
       {secilenBaxis === 'wash' ? (
-        <WashDashboard data={washDashboard} secilenIl={secilenIl} />
+        <WashDashboard data={washDashboard} secilenIl={secilenIl} washTotals={washTotals} />
       ) : (
         <>
           <section style={mainGrid}>
@@ -299,7 +300,7 @@ function Panel({ title, children, wide = false }) {
   );
 }
 
-function WashDashboard({ data, secilenIl }) {
+function WashDashboard({ data, secilenIl, washTotals }) {
   return (
     <>
       <section style={mainGrid}>
@@ -310,6 +311,8 @@ function WashDashboard({ data, secilenIl }) {
         <Panel title="Aftoyuma xerc xulasesi">
           <div style={metricRows}>
             <Metric label="Xercler" value={formatMoney(data.expenseTotal)} />
+            <Metric label="Isiq pulu" value={formatMoney(washTotals.isiq)} />
+            <Metric label="Isiq serfiyyati" value={`${washTotals.serfiyyat.toFixed(2)} Kwt`} />
             <Metric label="Su pulu" value={formatMoney(data.waterTotal)} />
             <Metric label="Su serfiyyati" value={`${data.waterUsage.toFixed(2)} kub`} />
             <Metric label="En aktiv ay" value={`${data.bestMonth.label} / ${data.bestMonth.value} masin`} />
