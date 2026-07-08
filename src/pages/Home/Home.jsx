@@ -8,64 +8,78 @@ function Home() {
   const [secilenIl, setSecilenIl] = useState(cariIl);
   const [secilenAy, setSecilenAy] = useState('Bütün Aylar');
   const [secilenBaxis, setSecilenBaxis] = useState('all');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const fetchHomeData = async () => {
       try {
-        const reports = await reportsApi.list({ il: secilenIl });
-        setData(reports);
-      } catch (error) {
-        console.error('Backend-dən məlumat alınarkən xəta:', error.message);
+        setError('');
+        setData(await reportsApi.list({ il: secilenIl }));
+      } catch (err) {
+        setError(err.message);
+        console.error('Backend-den melumat alinarken xeta:', err.message);
       }
     };
 
     fetchHomeData();
   }, [secilenIl]);
 
-  const { rentData, washData } = useMemo(() => {
-    const byMonth = (item) => secilenAy === 'Bütün Aylar' || String(item.ay).trim() === secilenAy;
-    const rent = data.filter((item) => item.ev !== 'MOYKA' && byMonth(item));
-    const wash = data.filter((item) => item.ev === 'MOYKA' && byMonth(item));
-    return { rentData: rent, washData: wash };
-  }, [data, secilenAy]);
+  const filtered = useMemo(() => {
+    return data.filter((item) => {
+      const monthMatch = secilenAy === 'Bütün Aylar' || String(item.ay).trim() === secilenAy;
+      const typeMatch =
+        secilenBaxis === 'all' ||
+        (secilenBaxis === 'rent' && item.ev !== 'MOYKA') ||
+        (secilenBaxis === 'wash' && item.ev === 'MOYKA');
+      return monthMatch && typeMatch;
+    });
+  }, [data, secilenAy, secilenBaxis]);
 
+  const rentData = useMemo(() => filtered.filter((item) => item.ev !== 'MOYKA'), [filtered]);
+  const washData = useMemo(() => filtered.filter((item) => item.ev === 'MOYKA'), [filtered]);
+  const totals = useMemo(() => summarize(filtered), [filtered]);
   const rentTotals = useMemo(() => summarize(rentData), [rentData]);
   const washTotals = useMemo(() => summarize(washData), [washData]);
 
-  const rentMonthlyTotals = useMemo(
-    () => buildMonthlyTotals(data.filter((item) => item.ev !== 'MOYKA'), aylar),
-    [data],
-  );
-  const washMonthlyTotals = useMemo(
-    () => buildMonthlyTotals(data.filter((item) => item.ev === 'MOYKA'), aylar),
-    [data],
+  const monthlyTrend = useMemo(() => {
+    const source = data.filter((item) => {
+      if (secilenBaxis === 'rent') return item.ev !== 'MOYKA';
+      if (secilenBaxis === 'wash') return item.ev === 'MOYKA';
+      return true;
+    });
+    return aylar.map((ay) => {
+      const rows = source.filter((item) => item.ay === ay);
+      return {
+        label: ay.slice(0, 3),
+        value: rows.reduce((sum, item) => sum + toAmount(item.total), 0),
+      };
+    });
+  }, [data, secilenBaxis]);
+
+  const houseTotals = useMemo(() => buildHouseTotals(rentData), [rentData]);
+  const composition = useMemo(
+    () => [
+      { label: 'Kiraye', value: totals.kiraye, color: theme.colors.primary },
+      { label: 'Isiq', value: totals.isiq, color: theme.colors.wash },
+      { label: 'Su', value: totals.su, color: theme.colors.info },
+      { label: 'Internet', value: totals.wifi, color: theme.colors.success },
+    ],
+    [totals],
   );
 
-  const rentHouseTotals = useMemo(
-    () => buildHouseTotals(rentData),
-    [rentData],
-  );
-
-  const summaryView = secilenBaxis === 'rent'
-    ? renderRentSummary(rentTotals)
-    : secilenBaxis === 'wash'
-      ? renderWashSummary(washTotals)
-      : (
-        <>
-          {renderRentSummary(rentTotals)}
-          {renderWashSummary(washTotals)}
-        </>
-      );
+  const bestMonth = monthlyTrend.reduce((best, item) => (item.value > best.value ? item : best), { label: '-', value: 0 });
+  const averageMonth = monthlyTrend.length ? monthlyTrend.reduce((sum, item) => sum + item.value, 0) / monthlyTrend.length : 0;
 
   return (
-    <div style={{ padding: '16px', maxWidth: '1120px', margin: '0 auto', color: theme.colors.text }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'end', justifyContent: 'space-between', marginBottom: '18px' }}>
+    <div style={wrap}>
+      <header style={hero}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '22px', color: theme.colors.text }}>Dashboard</h1>
-          <p style={{ margin: '4px 0 0', color: theme.colors.muted, fontSize: '13px' }}>İl və ay üzrə kirayə, aftoyuma və ümumi gəlir xülasəsi</p>
+          <div style={eyebrow}>ANALITIKA</div>
+          <h1 style={title}>Dashboard</h1>
+          <p style={sub}>Kiraye ve aftoyuma geliri, ayliq trendler ve obyekt performansi</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'end', flexWrap: 'wrap' }}>
-          <Field label="İl">
+        <div style={filters}>
+          <Field label="Il">
             <input type="number" min="2020" max="2100" value={secilenIl} onChange={(e) => setSecilenIl(e.target.value)} list="dashboard-iller" style={controlStyle} />
             <datalist id="dashboard-iller">
               {getYearOptions(secilenIl).map((il) => <option key={il} value={il} />)}
@@ -77,109 +91,61 @@ function Home() {
               {aylar.map((ay) => <option key={ay} value={ay}>{ay}</option>)}
             </select>
           </Field>
+          <Field label="Baxis">
+            <select value={secilenBaxis} onChange={(e) => setSecilenBaxis(e.target.value)} style={controlStyle}>
+              <option value="all">Hamisi</option>
+              <option value="rent">Kirayeler</option>
+              <option value="wash">Aftoyuma</option>
+            </select>
+          </Field>
         </div>
-      </div>
+      </header>
 
-      <div style={{ display: 'inline-flex', gap: '8px', padding: '6px', background: '#e8eef7', borderRadius: theme.radius.pill, marginBottom: '16px' }}>
-        <TabButton active={secilenBaxis === 'all'} onClick={() => setSecilenBaxis('all')}>Hamısı</TabButton>
-        <TabButton active={secilenBaxis === 'rent'} onClick={() => setSecilenBaxis('rent')}>Kirayələr</TabButton>
-        <TabButton active={secilenBaxis === 'wash'} onClick={() => setSecilenBaxis('wash')}>Aftoyuma</TabButton>
-      </div>
+      {error && <div style={alert}>Backend xetasi: {error}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '16px' }}>
-        <Kpi title="Kirayə gəliri" value={formatMoney(rentTotals.total)} accent={theme.colors.primary} />
-        <Kpi title="Aftoyuma gəliri" value={formatMoney(washTotals.total)} accent={theme.colors.wash} />
-        <Kpi title="Kirayə qeydi" value={`${rentData.length}`} accent={theme.colors.success} />
-        <Kpi title="Aftoyuma qeydi" value={`${washData.length}`} accent={theme.colors.teal} />
-      </div>
+      <section style={kpiGrid}>
+        <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
+        <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />
+        <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />
+        <Kpi title="Ayliq orta" value={formatMoney(averageMonth)} note={`En yaxsi: ${bestMonth.label}`} color={theme.colors.teal} />
+      </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
-        {secilenBaxis !== 'wash' && (
-          <Panel title={`${secilenIl} - Kirayələr`}>
-            <BarChart data={rentMonthlyTotals} color="#4b7bec" suffix="₼" />
-          </Panel>
-        )}
-        {secilenBaxis !== 'rent' && (
-          <Panel title={`${secilenIl} - Aftoyuma`}>
-            <BarChart data={washMonthlyTotals} color="#e84118" suffix="₼" />
-          </Panel>
-        )}
-        {secilenBaxis !== 'wash' && (
-          <Panel title="Kirayələr üzrə evlər">
-            <BarChart data={rentHouseTotals} color="#20bf6b" suffix="₼" horizontal />
-          </Panel>
-        )}
-        {secilenBaxis !== 'rent' && (
-          <Panel title="Aftoyuma xülasəsi">
-            <div style={{ display: 'grid', gap: '10px' }}>
-              <MiniRow label="Xalis sərfiyyat" value={`${washTotals.serfiyyat.toFixed(2)} Kwt`} />
-              <MiniRow label="İşıq pulu" value={formatMoney(washTotals.isiq)} />
-              <MiniRow label="Yekun total" value={formatMoney(washTotals.total)} />
-              <ReportList data={washData} />
-            </div>
-          </Panel>
-        )}
-      </div>
+      <section style={mainGrid}>
+        <Panel title={`${secilenIl} ayliq trend`} wide>
+          <ColumnChart data={monthlyTrend} />
+        </Panel>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px', marginTop: '14px' }}>
-        {secilenBaxis !== 'wash' && (
-          <Panel title="Kirayə gridi">
-            <DataTable
-              rows={rentData}
-              columns={[
-                ['İl / Ay', (item) => `${item.il} / ${item.ay}`],
-                ['Ev', (item) => item.ev],
-                ['Kirayə', (item) => formatMoney(item.kiraye)],
-                ['İşıq', (item) => formatMoney(item.isiqPulu)],
-                ['Su', (item) => formatMoney(item.suCem)],
-                ['Internet', (item) => formatMoney(item.wifi)],
-                ['Total', (item) => formatMoney(item.total)],
-              ]}
-            />
-          </Panel>
-        )}
+        <Panel title="Gelir payi">
+          <Donut segments={[
+            { label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary },
+            { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
+          ]} total={totals.total} />
+        </Panel>
 
-        {secilenBaxis !== 'rent' && (
-          <Panel title="Aftoyuma gridi">
-            <DataTable
-              rows={washData}
-              columns={[
-                ['İl / Ay', (item) => `${item.il} / ${item.ay}`],
-                ['Ev', (item) => item.ev],
-                ['Köhnə', (item) => item.kohneIsiq],
-                ['Yeni', (item) => item.yeniIsiq],
-                ['Sərfiyyat', (item) => `${Number(item.serfiyyat).toFixed(2)} Kwt`],
-                ['İşıq Pulu', (item) => formatMoney(item.isiqPulu)],
-                ['Total', (item) => formatMoney(item.total)],
-              ]}
-            />
-          </Panel>
-        )}
-      </div>
+        <Panel title="Xerc ve gelir terkibi">
+          <StackList data={composition} total={Math.max(totals.kiraye + totals.isiq + totals.su + totals.wifi, 1)} />
+        </Panel>
 
-      {summaryView}
-    </div>
-  );
-}
+        <Panel title="Evler uzre ranking">
+          <Ranking data={houseTotals} />
+        </Panel>
+      </section>
 
-function renderRentSummary(totals) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', marginTop: '16px' }}>
-      <Summary title="Kirayə cəmi" value={formatMoney(totals.kiraye)} color="#4b7bec" />
-      <Summary title="İşıq" value={formatMoney(totals.isiq)} color="#eb3b5a" />
-      <Summary title="Su" value={formatMoney(totals.su)} color="#2d98da" />
-      <Summary title="Internet" value={formatMoney(totals.wifi)} color="#20bf6b" />
-      <Summary title="Yekun total" value={formatMoney(totals.total)} color="#0f172a" />
-    </div>
-  );
-}
+      <section style={detailGrid}>
+        <Panel title="Operativ xulase">
+          <div style={metricRows}>
+            <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />
+            <Metric label="Isiq pulu" value={formatMoney(totals.isiq)} />
+            <Metric label="Su" value={formatMoney(totals.su)} />
+            <Metric label="Internet" value={formatMoney(totals.wifi)} />
+            <Metric label="Serfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} />
+          </div>
+        </Panel>
 
-function renderWashSummary(totals) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', marginTop: '16px' }}>
-      <Summary title="Xalis sərfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} color="#334155" />
-      <Summary title="İşıq pulu" value={formatMoney(totals.isiq)} color="#e84118" />
-      <Summary title="Yekun total" value={formatMoney(totals.total)} color="#20bf6b" />
+        <Panel title="Son hesabatlar" wide>
+          <DataTable rows={filtered.slice(0, 12)} />
+        </Panel>
+      </section>
     </div>
   );
 }
@@ -198,13 +164,6 @@ function summarize(items) {
   );
 }
 
-function buildMonthlyTotals(items, months) {
-  return months.map((ay) => ({
-    label: ay.slice(0, 3),
-    value: items.filter((item) => item.ay === ay).reduce((sum, item) => sum + toAmount(item.total), 0),
-  }));
-}
-
 function buildHouseTotals(items) {
   const grouped = items.reduce((acc, item) => {
     acc[item.ev] = (acc[item.ev] || 0) + toAmount(item.total);
@@ -213,102 +172,168 @@ function buildHouseTotals(items) {
 
   return Object.entries(grouped)
     .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
 }
 
-function Kpi({ title, value, accent }) {
+function Kpi({ title, value, note, color }) {
   return (
-    <div style={{ background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '12px', borderTop: `3px solid ${accent}` }}>
-      <div style={{ color: theme.colors.muted, fontSize: '12px', fontWeight: 600 }}>{title}</div>
-      <div style={{ color: theme.colors.text, fontSize: '19px', fontWeight: 800, marginTop: '6px' }}>{value}</div>
+    <div style={kpi}>
+      <div style={{ ...kpiAccent, background: color }} />
+      <div style={kpiLabel}>{title}</div>
+      <div style={kpiValue}>{value}</div>
+      <div style={kpiNote}>{note}</div>
     </div>
   );
 }
 
-function Panel({ title, children }) {
+function Panel({ title, children, wide = false }) {
   return (
-    <section style={{ background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '14px', minWidth: 0, boxShadow: '0 1px 0 rgba(15, 23, 42, 0.02)' }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: '15px', color: theme.colors.text }}>{title}</h2>
+    <section style={{ ...panel, gridColumn: wide ? 'span 2' : 'span 1' }}>
+      <h2 style={panelTitle}>{title}</h2>
       {children}
     </section>
   );
 }
 
-function BarChart({ data, color, suffix, horizontal = false }) {
+function ColumnChart({ data }) {
   const max = Math.max(...data.map((item) => item.value), 1);
-  const visible = data.length ? data : [{ label: 'Yoxdur', value: 0 }];
 
-  if (horizontal) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {visible.map((item) => (
-          <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '64px 1fr 78px', gap: '8px', alignItems: 'center', fontSize: '12px' }}>
-            <span style={{ fontWeight: 700 }}>{item.label}</span>
-            <div style={{ height: '10px', background: '#eef2f7', borderRadius: '999px', overflow: 'hidden' }}>
-              <div style={{ width: `${(item.value / max) * 100}%`, height: '100%', background: color }} />
-            </div>
-            <span style={{ textAlign: 'right', color: '#475569' }}>{item.value.toFixed(0)} {suffix}</span>
+  return (
+    <div style={chartWrap}>
+      {data.map((item) => (
+        <div key={item.label} style={chartItem}>
+          <div style={barTrack}>
+            <div
+              title={`${item.label}: ${formatMoney(item.value)}`}
+              style={{
+                ...bar,
+                height: `${Math.max(3, (item.value / max) * 100)}%`,
+                background: item.value === max ? theme.colors.primary : '#8fb4ff',
+              }}
+            />
           </div>
+          <span style={axisLabel}>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Donut({ segments, total }) {
+  const safeTotal = Math.max(total, 1);
+  const gradient = segments
+    .reduce(
+      (acc, segment) => {
+        const start = acc.cursor;
+        const end = start + (segment.value / safeTotal) * 100;
+        return {
+          cursor: end,
+          parts: [...acc.parts, `${segment.color} ${start}% ${end}%`],
+        };
+      },
+      { cursor: 0, parts: [] },
+    )
+    .parts.join(', ');
+
+  return (
+    <div style={donutWrap}>
+      <div style={{ ...donut, background: `conic-gradient(${gradient || '#e2e8f0 0 100%'})` }}>
+        <div style={donutHole}>
+          <strong>{formatMoney(total)}</strong>
+          <span>total</span>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: '9px' }}>
+        {segments.map((item) => (
+          <Legend key={item.label} color={item.color} label={item.label} value={formatMoney(item.value)} />
         ))}
       </div>
-    );
-  }
-
-  return (
-    <div style={{ height: '220px', display: 'grid', gridTemplateColumns: `repeat(${visible.length}, minmax(22px, 1fr))`, gap: '8px', alignItems: 'end', borderBottom: '1px solid #e2e8f0', paddingTop: '6px' }}>
-      {visible.map((item) => (
-        <div key={item.label} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-          <div title={`${item.value.toFixed(2)} ${suffix}`} style={{ width: '100%', height: `${Math.max(4, (item.value / max) * 180)}px`, background: color, borderRadius: '5px 5px 0 0' }} />
-          <span style={{ fontSize: '11px', color: '#64748b' }}>{item.label}</span>
-        </div>
-      ))}
     </div>
   );
 }
 
-function ReportList({ data }) {
-  if (!data.length) {
-    return <div style={{ padding: '24px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surfaceSoft, borderRadius: theme.radius.md }}>Məlumat yoxdur.</div>;
-  }
-
+function StackList({ data, total }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflow: 'auto' }}>
+    <div style={{ display: 'grid', gap: '12px' }}>
       {data.map((item) => (
-        <div key={`${item.il}-${item.ay}-${item.ev}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center', padding: '10px', border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, background: theme.colors.surface }}>
-          <div>
-            <strong style={{ fontSize: '13px' }}>{item.ev}</strong>
-            <div style={{ fontSize: '12px', color: theme.colors.muted }}>{item.il} / {item.ay}</div>
+        <div key={item.label}>
+          <div style={stackHead}>
+            <span>{item.label}</span>
+            <strong>{formatMoney(item.value)}</strong>
           </div>
-          <strong style={{ color: theme.colors.success }}>{formatMoney(item.total)}</strong>
+          <div style={stackTrack}>
+            <div style={{ width: `${Math.min(100, (item.value / total) * 100)}%`, height: '100%', background: item.color }} />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-function DataTable({ rows, columns }) {
-  if (!rows.length) {
-    return <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', background: '#f8fafc', borderRadius: '8px' }}>Məlumat yoxdur.</div>;
-  }
+function Ranking({ data }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  if (!data.length) return <Empty />;
+
+  return (
+    <div style={{ display: 'grid', gap: '10px' }}>
+      {data.map((item, index) => (
+        <div key={item.label} style={rankRow}>
+          <span style={rankIndex}>{index + 1}</span>
+          <span style={rankName}>{item.label}</span>
+          <div style={rankTrack}>
+            <div style={{ width: `${(item.value / max) * 100}%`, height: '100%', background: theme.colors.success }} />
+          </div>
+          <strong style={rankValue}>{formatMoney(item.value)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div style={metric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Legend({ color, label, value }) {
+  return (
+    <div style={legend}>
+      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: color }} />
+      <span style={{ flex: 1 }}>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DataTable({ rows }) {
+  if (!rows.length) return <Empty />;
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+      <table style={table}>
         <thead>
-          <tr style={{ background: '#f8fafc' }}>
-            {columns.map(([label]) => (
-              <th key={label} style={{ textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>{label}</th>
+          <tr>
+            {['Tarix', 'Obyekt', 'Kiraye', 'Isiq', 'Su', 'Internet', 'Total'].map((label) => (
+              <th key={label} style={th}>{label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${row.il}-${row.ay}-${row.ev}-${index}`} style={{ background: index % 2 === 0 ? '#fff' : '#f8fafc' }}>
-              {columns.map(([label, accessor]) => (
-                <td key={label} style={{ padding: '10px 8px', borderBottom: '1px solid #eef2f7', color: '#0f172a', whiteSpace: 'nowrap' }}>
-                  {typeof accessor === 'function' ? accessor(row) : row[accessor]}
-                </td>
-              ))}
+            <tr key={`${row.id}-${index}`} style={{ background: index % 2 ? '#f8fafc' : '#fff' }}>
+              <td style={td}>{row.il} / {row.ay}</td>
+              <td style={td}>{row.ev}</td>
+              <td style={td}>{formatMoney(row.kiraye)}</td>
+              <td style={td}>{formatMoney(row.isiqPulu)}</td>
+              <td style={td}>{formatMoney(row.suCem)}</td>
+              <td style={td}>{formatMoney(row.wifi)}</td>
+              <td style={{ ...td, fontWeight: 800 }}>{formatMoney(row.total)}</td>
             </tr>
           ))}
         </tbody>
@@ -317,22 +342,8 @@ function DataTable({ rows, columns }) {
   );
 }
 
-function Summary({ title, value, color }) {
-  return (
-    <div style={{ background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '12px' }}>
-      <div style={{ color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{title}</div>
-      <div style={{ color, fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{value}</div>
-    </div>
-  );
-}
-
-function MiniRow({ label, value }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '13px' }}>
-      <span style={{ color: theme.colors.muted }}>{label}</span>
-      <strong style={{ color: theme.colors.text }}>{value}</strong>
-    </div>
-  );
+function Empty() {
+  return <div style={empty}>Melumat yoxdur.</div>;
 }
 
 function Field({ label, children }) {
@@ -344,42 +355,57 @@ function Field({ label, children }) {
   );
 }
 
-function TabButton({ active, children, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: 'none',
-        padding: '10px 14px',
-        borderRadius: theme.radius.pill,
-        background: active ? theme.colors.text : 'transparent',
-        color: active ? '#fff' : '#334155',
-        fontWeight: 700,
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-const labelStyle = {
-  display: 'block',
-  color: theme.colors.muted,
-  fontSize: '12px',
-  fontWeight: 700,
-  marginBottom: '5px',
-};
-
-const controlStyle = {
-  width: '132px',
-  padding: '10px',
-  borderRadius: '7px',
+const wrap = { maxWidth: '1280px', margin: '0 auto', padding: '16px', color: theme.colors.text };
+const hero = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'end',
+  gap: '16px',
+  flexWrap: 'wrap',
+  padding: '18px',
   border: `1px solid ${theme.colors.border}`,
-  background: '#fff',
-  fontSize: '14px',
-  boxSizing: 'border-box',
+  background: '#ffffff',
+  borderRadius: theme.radius.md,
+  marginBottom: '14px',
 };
+const eyebrow = { fontSize: '11px', fontWeight: 800, color: theme.colors.primary, letterSpacing: 0 };
+const title = { margin: '4px 0 0', fontSize: '26px', color: theme.colors.text };
+const sub = { margin: '5px 0 0', color: theme.colors.muted, fontSize: '13px' };
+const filters = { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'end' };
+const labelStyle = { display: 'block', color: theme.colors.muted, fontSize: '12px', fontWeight: 700, marginBottom: '5px' };
+const controlStyle = { width: '138px', padding: '10px', borderRadius: '7px', border: `1px solid ${theme.colors.border}`, background: '#fff', fontSize: '14px', boxSizing: 'border-box' };
+const alert = { padding: '12px', marginBottom: '14px', borderRadius: theme.radius.sm, background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3', fontSize: '13px' };
+const kpiGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '12px' };
+const kpi = { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '14px' };
+const kpiAccent = { position: 'absolute', top: 0, left: 0, width: '100%', height: '4px' };
+const kpiLabel = { color: theme.colors.muted, fontSize: '12px', fontWeight: 700 };
+const kpiValue = { color: theme.colors.text, fontSize: '23px', fontWeight: 900, marginTop: '8px' };
+const kpiNote = { color: theme.colors.muted, fontSize: '12px', marginTop: '6px' };
+const mainGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', alignItems: 'stretch' };
+const detailGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginTop: '12px' };
+const panel = { background: '#fff', border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.md, padding: '14px', minWidth: 0, boxShadow: '0 1px 0 rgba(15, 23, 42, 0.03)' };
+const panelTitle = { margin: '0 0 12px', fontSize: '14px', color: theme.colors.text };
+const chartWrap = { height: '250px', display: 'grid', gridTemplateColumns: 'repeat(12, minmax(22px, 1fr))', gap: '8px', alignItems: 'end', padding: '6px 0 0', borderBottom: '1px solid #e2e8f0' };
+const chartItem = { minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px', height: '100%' };
+const barTrack = { flex: 1, width: '100%', display: 'flex', alignItems: 'end', background: '#f1f5f9', borderRadius: '6px 6px 0 0', overflow: 'hidden' };
+const bar = { width: '100%', minHeight: '3px', borderRadius: '6px 6px 0 0' };
+const axisLabel = { fontSize: '11px', color: theme.colors.muted };
+const donutWrap = { display: 'grid', gridTemplateColumns: '150px 1fr', gap: '14px', alignItems: 'center' };
+const donut = { width: '150px', height: '150px', borderRadius: '50%', display: 'grid', placeItems: 'center' };
+const donutHole = { width: '94px', height: '94px', borderRadius: '50%', background: '#fff', display: 'grid', placeItems: 'center', textAlign: 'center', fontSize: '12px', color: theme.colors.muted };
+const legend = { display: 'flex', alignItems: 'center', gap: '8px', color: theme.colors.muted, fontSize: '12px' };
+const stackHead = { display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '6px', fontSize: '12px', color: theme.colors.muted };
+const stackTrack = { height: '10px', background: '#eef2f7', borderRadius: theme.radius.pill, overflow: 'hidden' };
+const rankRow = { display: 'grid', gridTemplateColumns: '24px 64px 1fr 92px', alignItems: 'center', gap: '8px', fontSize: '12px' };
+const rankIndex = { width: '22px', height: '22px', display: 'grid', placeItems: 'center', borderRadius: '50%', background: '#e8eefc', color: theme.colors.primary, fontWeight: 800 };
+const rankName = { fontWeight: 800, color: theme.colors.text };
+const rankTrack = { height: '9px', borderRadius: theme.radius.pill, overflow: 'hidden', background: '#eef2f7' };
+const rankValue = { textAlign: 'right', color: theme.colors.text };
+const metricRows = { display: 'grid', gap: '8px' };
+const metric = { display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '10px', background: '#f8fafc', borderRadius: theme.radius.sm, fontSize: '13px' };
+const table = { width: '100%', borderCollapse: 'collapse', fontSize: '12px' };
+const th = { textAlign: 'left', padding: '10px 8px', borderBottom: `1px solid ${theme.colors.border}`, color: '#475569', background: '#f8fafc' };
+const td = { padding: '10px 8px', borderBottom: '1px solid #eef2f7', color: theme.colors.text, whiteSpace: 'nowrap' };
+const empty = { padding: '28px', textAlign: 'center', color: theme.colors.muted, background: '#f8fafc', borderRadius: theme.radius.sm };
 
 export default Home;

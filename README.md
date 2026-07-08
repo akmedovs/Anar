@@ -130,13 +130,7 @@ Manual yaratmaq lazımdırsa:
 psql "postgres://anar_user:BURADA_GUCLU_PAROL_YAZIN@127.0.0.1:5432/anar" -f server/schema.sql
 ```
 
-`reports` cədvəlində unikal hesabat açarı:
-
-```text
-il + ay + ev
-```
-
-Eyni il/ay/ev yenidən saxlananda köhnə qeyd update olunur.
+Eyni il/ay/ev üçün yeni hesabat saxlananda əvvəlki qeyd dəyişmir. Hər saxlanma ayrıca yeni qeyd kimi əlavə olunur.
 
 ## Lokal Development
 
@@ -286,7 +280,7 @@ GET /api/reports?il=2026
 GET /api/reports?il=2026&ay=Iyul
 ```
 
-Hesabat yaratmaq/update etmək:
+Hesabat yaratmaq:
 
 ```bash
 POST /api/reports

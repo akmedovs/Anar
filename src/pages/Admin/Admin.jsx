@@ -121,7 +121,7 @@ function Admin() {
           };
 
     try {
-      await reportsApi.upsert(finalData);
+      await reportsApi.create(finalData);
       const summaryText = buildSummaryText(finalData, ayarlar);
       setSavedSummary(summaryText);
       try {

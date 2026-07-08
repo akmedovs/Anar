@@ -39,8 +39,7 @@ async function initDb() {
       su_cem NUMERIC(12, 2) NOT NULL DEFAULT 0,
       wifi NUMERIC(12, 2) NOT NULL DEFAULT 0,
       total NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE (il, ay, ev)
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS vehicle_events (
@@ -53,6 +52,8 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  await pool.query('ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_il_ay_ev_key');
 }
 
 function sendJson(res, statusCode, payload) {
@@ -169,7 +170,7 @@ async function listReports(url) {
   return result.rows.map(reportFromRow);
 }
 
-async function upsertReport(input) {
+async function createReport(input) {
   const report = normalizeReport(input);
   const result = await pool.query(
     `
@@ -178,17 +179,6 @@ async function upsertReport(input) {
         isiq_pulu, su_cem, wifi, total, updated_at
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-      ON CONFLICT (il, ay, ev)
-      DO UPDATE SET
-        kiraye = EXCLUDED.kiraye,
-        kohne_isiq = EXCLUDED.kohne_isiq,
-        yeni_isiq = EXCLUDED.yeni_isiq,
-        serfiyyat = EXCLUDED.serfiyyat,
-        isiq_pulu = EXCLUDED.isiq_pulu,
-        su_cem = EXCLUDED.su_cem,
-        wifi = EXCLUDED.wifi,
-        total = EXCLUDED.total,
-        updated_at = now()
       RETURNING *
     `,
     [
@@ -210,6 +200,12 @@ async function upsertReport(input) {
 }
 
 async function deleteReport(url) {
+  const id = Number(url.searchParams.get('id'));
+  if (id) {
+    await pool.query('DELETE FROM reports WHERE id = $1', [id]);
+    return;
+  }
+
   const il = Number(url.searchParams.get('il')) || new Date().getFullYear();
   const ay = String(url.searchParams.get('ay') || '').trim();
   const ev = String(url.searchParams.get('ev') || '').trim();
@@ -255,7 +251,7 @@ async function handleRequest(req, res) {
   }
 
   if (url.pathname === '/api/reports' && req.method === 'POST') {
-    sendJson(res, 200, await upsertReport(await readJson(req)));
+    sendJson(res, 200, await createReport(await readJson(req)));
     return;
   }
 

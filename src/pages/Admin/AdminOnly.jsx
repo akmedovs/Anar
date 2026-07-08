@@ -62,7 +62,7 @@ function AdminOnly() {
     const suCem = suNeferNum * suQiymet;
     const total = kirayeNum + isiqPulu + suCem + wifiNum;
 
-    await reportsApi.upsert({
+    await reportsApi.create({
       il,
       ay: formData.ay,
       ev: formData.ev,
@@ -82,8 +82,8 @@ function AdminOnly() {
 
   return (
     <div style={wrap}>
-      <h1 style={title}>Kirayə düzəlişləri</h1>
-      <p style={sub}>Mövcud qeydi seç, dəyiş və yenidən yadda saxla</p>
+      <h1 style={title}>Kirayə qeydləri</h1>
+      <p style={sub}>Mövcud qeydi seç, məlumatları yeni qeyd kimi saxla</p>
 
       <section style={panel}>
         <h2 style={panelTitle}>Mövcud qeydlər</h2>
@@ -158,7 +158,7 @@ const control = { width: '100%', padding: '10px', borderRadius: '7px', border: `
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const Row = ({ children }) => <div style={rowStyle}>{children}</div>;
 const Field = ({ label, children }) => <div><label style={{ display: 'block', marginBottom: '5px', color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{label}</label>{children}</div>;
-const keyOf = (item) => `${item.il}-${item.ay}-${item.ev}`;
+const keyOf = (item) => `${item.id}-${item.il}-${item.ay}-${item.ev}`;
 const pill = (active) => ({ border: `1px solid ${theme.colors.border}`, background: active ? theme.colors.text : theme.colors.surface, color: active ? '#fff' : '#334155', borderRadius: theme.radius.pill, padding: '8px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 });
 
 export default AdminOnly;

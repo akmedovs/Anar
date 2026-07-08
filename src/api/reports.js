@@ -26,14 +26,14 @@ export const reportsApi = {
     const query = params.toString();
     return request(`/api/reports${query ? `?${query}` : ''}`);
   },
-  upsert(report) {
+  create(report) {
     return request('/api/reports', {
       method: 'POST',
       body: JSON.stringify(report),
     });
   },
-  remove({ il, ay, ev }) {
-    const params = new URLSearchParams({ il, ay, ev });
+  remove({ id, il, ay, ev }) {
+    const params = id ? new URLSearchParams({ id }) : new URLSearchParams({ il, ay, ev });
     return request(`/api/reports?${params.toString()}`, {
       method: 'DELETE',
     });
