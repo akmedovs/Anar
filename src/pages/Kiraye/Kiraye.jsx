@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { reportsApi } from '../../api/reports';
-import { aylar, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
+import { aylar, cariIl, formatMoney, getYearOptions, netReportTotal, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
 function Kiraye() {
@@ -32,7 +32,7 @@ function Kiraye() {
       isiq: acc.isiq + toAmount(item.isiqPulu),
       su: acc.su + toAmount(item.suCem),
       wifi: acc.wifi + toAmount(item.wifi),
-      total: acc.total + toAmount(item.total),
+      total: acc.total + netReportTotal(item),
     }),
     { kiraye: 0, isiq: 0, su: 0, wifi: 0, total: 0 },
   );
@@ -61,11 +61,11 @@ function Kiraye() {
       </header>
 
       <div style={kpiRow}>
-        <Kpi label="Kiraye cəmi" value={formatMoney(totals.kiraye)} />
-        <Kpi label="İşıq" value={formatMoney(totals.isiq)} />
-        <Kpi label="Su" value={formatMoney(totals.su)} />
-        <Kpi label="Internet" value={formatMoney(totals.wifi)} />
-        <Kpi label="Total" value={formatMoney(totals.total)} />
+        <Kpi label="Kiraye gəliri" value={formatMoney(totals.kiraye)} />
+        <Kpi label="İşıq xərci" value={formatMoney(totals.isiq)} />
+        <Kpi label="Su xərci" value={formatMoney(totals.su)} />
+        <Kpi label="Internet xərci" value={formatMoney(totals.wifi)} />
+        <Kpi label="Net" value={formatMoney(totals.total)} />
       </div>
 
       <section style={panel}>
@@ -76,10 +76,10 @@ function Kiraye() {
             ['İl / Ay', (item) => `${item.il} / ${item.ay}`],
             ['Ev', (item) => item.ev],
             ['Kiraye', (item) => formatMoney(item.kiraye)],
-            ['İşıq', (item) => formatMoney(item.isiqPulu)],
-            ['Su', (item) => formatMoney(item.suCem)],
-            ['Internet', (item) => formatMoney(item.wifi)],
-            ['Total', (item) => formatMoney(item.total)],
+            ['İşıq xərci', (item) => formatMoney(item.isiqPulu)],
+            ['Su xərci', (item) => formatMoney(item.suCem)],
+            ['Internet xərci', (item) => formatMoney(item.wifi)],
+            ['Net', (item) => formatMoney(netReportTotal(item))],
           ]}
         />
       </section>

@@ -24,6 +24,10 @@ export function formatMoney(value) {
   return `${toAmount(value).toFixed(2)} ₼`;
 }
 
+export function netReportTotal(item) {
+  return toAmount(item.kiraye) - toAmount(item.isiqPulu) - toAmount(item.suCem) - toAmount(item.wifi);
+}
+
 export function getYearOptions(activeYear = cariIl) {
   const start = Math.min(cariIl - 2, Number(activeYear) || cariIl);
   const end = Math.max(cariIl + 3, Number(activeYear) || cariIl);

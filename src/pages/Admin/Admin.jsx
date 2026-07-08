@@ -35,22 +35,19 @@ function Admin() {
     const secilenAyIndex = aylar.indexOf(formData.ay);
     if (secilenAyIndex === -1) return;
 
-    const evvelkiAyIndex = secilenAyIndex === 0 ? 11 : secilenAyIndex - 1;
-    const evvelkiIl = secilenAyIndex === 0 ? Number(formData.il) - 1 : Number(formData.il);
-    const evvelkiAyAdi = aylar[evvelkiAyIndex];
-
-    const evvelkiHesabat = dbData.find(
-      (item) =>
-        Number(item.il) === evvelkiIl &&
-        String(item.ev).trim() === String(formData.ev).trim() &&
-        String(item.ay).trim().toLowerCase() === evvelkiAyAdi.toLowerCase(),
-    );
+    const currentReport = findLatestReport(dbData, formData.il, formData.ay, formData.ev);
+    const previousReport = findPreviousReport(dbData, formData.il, formData.ay, formData.ev);
 
     setFormData((prev) => ({
       ...prev,
-      kohneIsiq: evvelkiHesabat?.yeniIsiq || '',
+      kohneIsiq: currentReport ? String(currentReport.kohneIsiq ?? '') : previousReport ? String(previousReport.yeniIsiq ?? '') : '',
+      yeniIsiq: currentReport ? String(currentReport.yeniIsiq ?? '') : '',
       ...(formData.ev !== 'MOYKA'
-        ? { kiraye: ayarlar.standartKiraye, internet: ayarlar.standartInternet }
+        ? {
+            kiraye: currentReport ? String(currentReport.kiraye ?? '') : ayarlar.standartKiraye,
+            internet: currentReport ? String(currentReport.wifi ?? '') : ayarlar.standartInternet,
+            suNefer: currentReport ? String((Number(currentReport.suCem) || 0) / (Number(ayarlar.suQiymet) || 1)) : prev.suNefer,
+          }
         : { kiraye: '0', internet: '0', suNefer: '0' }),
     }));
   }, [formData.ev, formData.ay, formData.il, ayarlar, dbData]);
@@ -86,10 +83,10 @@ function Admin() {
     const suQiymetNum = Number(ayarlar.suQiymet) || 0;
     const internetNum = Number(formData.internet) || 0;
 
-    const serfiyyat = yeniIsiqNum - kohneIsiqNum;
+    const serfiyyat = Math.max(0, yeniIsiqNum - kohneIsiqNum);
     const isiqPulu = serfiyyat * tarif;
     const suCem = suNeferNum * suQiymetNum;
-    const total = kirayeNum + isiqPulu + suCem + internetNum;
+    const total = kirayeNum - isiqPulu - suCem - internetNum;
 
     const finalData =
       formData.ev === 'MOYKA'
@@ -104,7 +101,7 @@ function Admin() {
             isiqPulu: Number((Math.max(0, serfiyyat) * tarif).toFixed(2)),
             suCem: 0,
             wifi: 0,
-            total: Number((Math.max(0, serfiyyat) * tarif).toFixed(2)),
+            total: Number((0 - Math.max(0, serfiyyat) * tarif).toFixed(2)),
           }
         : {
             il: currentYear,
@@ -144,8 +141,8 @@ function Admin() {
         <h3 style={sectionTitle}>Qlobal tarif ayarları</h3>
         <div style={{ display: 'grid', gap: '12px' }}>
           {[
-            ['isiqTarif', 'İşıq Tarifi (1 Kwt / ₼)'],
-            ['suQiymet', 'Su Qiyməti (Nəfər başı / ₼)'],
+            ['isiqTarif', 'İşıq xərci tarifi (1 Kwt / ₼)'],
+            ['suQiymet', 'Su xərci (Nəfər başı / ₼)'],
             ['standartKiraye', 'Standart Kirayə (₼)'],
             ['standartInternet', 'Standart Internet (₼)'],
           ].map(([name, label]) => (
@@ -185,7 +182,7 @@ function Admin() {
           {!isMoyka && (
             <Row>
               <Field label="Kirayə Haqqı (₼)"><input type="number" step="any" name="kiraye" value={formData.kiraye} onChange={handleInputChange} style={inputStyle} /></Field>
-              <Field label="Internet pulu (₼)"><input type="number" step="any" name="internet" value={formData.internet} onChange={handleInputChange} style={inputStyle} /></Field>
+              <Field label="Internet xərci (₼)"><input type="number" step="any" name="internet" value={formData.internet} onChange={handleInputChange} style={inputStyle} /></Field>
             </Row>
           )}
 
@@ -200,7 +197,7 @@ function Admin() {
           {!isMoyka && (
             <div style={infoBox(false)}>
               <span style={infoTitle(false)}>Su hesabı</span>
-              <Field label="Su Nəfər Sayı"><input type="number" name="suNefer" value={formData.suNefer} onChange={handleInputChange} style={inputStyle} /></Field>
+              <Field label="Su nəfər sayı"><input type="number" name="suNefer" value={formData.suNefer} onChange={handleInputChange} style={inputStyle} /></Field>
             </div>
           )}
 
@@ -241,12 +238,30 @@ function buildSummaryText(data, ayarlar) {
     `Kiraye: ${Number(data.kiraye || 0).toFixed(2)} ₼`,
     `Kohne isiq: ${Number(data.kohneIsiq || 0).toFixed(2)}`,
     `Yeni isiq: ${Number(data.yeniIsiq || 0).toFixed(2)}`,
-    `Isiq pulu: ${Number(data.isiqPulu || 0).toFixed(2)} ₼`,
-    `Su: ${Number(data.suCem || 0).toFixed(2)} ₼`,
-    `Internet: ${Number(data.wifi || 0).toFixed(2)} ₼`,
-    `Total: ${Number(data.total || 0).toFixed(2)} ₼`,
+    `Isiq xerci: ${Number(data.isiqPulu || 0).toFixed(2)} ₼`,
+    `Su xerci: ${Number(data.suCem || 0).toFixed(2)} ₼`,
+    `Internet xerci: ${Number(data.wifi || 0).toFixed(2)} ₼`,
+    `Net: ${Number(data.total || 0).toFixed(2)} ₼`,
     `Tarifler: isiq=${ayarlar.isiqTarif} / su=${ayarlar.suQiymet} / kiraye=${ayarlar.standartKiraye} / internet=${ayarlar.standartInternet}`,
   ].join('\n');
+}
+
+function findLatestReport(data, il, ay, ev) {
+  return data
+    .filter((item) =>
+      Number(item.il) === Number(il) &&
+      String(item.ev).trim() === String(ev).trim() &&
+      String(item.ay).trim().toLowerCase() === String(ay).trim().toLowerCase())
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+}
+
+function findPreviousReport(data, il, ay, ev) {
+  const currentIndex = aylar.indexOf(ay);
+  if (currentIndex === -1) return null;
+
+  const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
+  const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
+  return findLatestReport(data, previousIl, previousAy, ev);
 }
 
 const wrap = { display: 'grid', gap: '20px', maxWidth: '560px', margin: '15px auto', padding: '0 15px', color: theme.colors.text };

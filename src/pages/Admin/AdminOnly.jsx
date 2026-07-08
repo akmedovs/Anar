@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { reportsApi } from '../../api/reports';
-import { aylar, cariIl, formatMoney } from '../../constants/reporting';
+import { aylar, cariIl, formatMoney, netReportTotal } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
 function AdminOnly() {
@@ -25,6 +25,19 @@ function AdminOnly() {
   useEffect(() => {
     fetchReports(formData.il).catch((error) => console.error(error.message));
   }, [fetchReports, formData.il]);
+
+  useEffect(() => {
+    const current = findLatestReport(dbData, formData.il, formData.ay, formData.ev);
+    const previous = findPreviousReport(dbData, formData.il, formData.ay, formData.ev);
+
+    setFormData((prev) => ({
+      ...prev,
+      kohneIsiq: current ? String(current.kohneIsiq ?? '') : previous ? String(previous.yeniIsiq ?? '') : '',
+      yeniIsiq: current ? String(current.yeniIsiq ?? '') : '',
+      kiraye: current ? String(current.kiraye ?? '') : prev.kiraye,
+      wifi: current ? String(current.wifi ?? '') : prev.wifi,
+    }));
+  }, [dbData, formData.il, formData.ay, formData.ev]);
 
   useEffect(() => {
     if (!selectedReportKey) return;
@@ -57,10 +70,10 @@ function AdminOnly() {
     const wifiNum = Number(formData.wifi) || 0;
     const tarif = 0.15;
     const suQiymet = 3;
-    const serfiyyat = yeniIsiqNum - kohneIsiqNum;
+    const serfiyyat = Math.max(0, yeniIsiqNum - kohneIsiqNum);
     const isiqPulu = serfiyyat * tarif;
     const suCem = suNeferNum * suQiymet;
-    const total = kirayeNum + isiqPulu + suCem + wifiNum;
+    const total = kirayeNum - isiqPulu - suCem - wifiNum;
 
     await reportsApi.create({
       il,
@@ -108,7 +121,7 @@ function AdminOnly() {
           </Row>
           <Row>
             <Field label="Su nəfər"><input type="number" name="suNefer" value={formData.suNefer} onChange={handleChange} style={control} /></Field>
-            <Field label="Internet"><input type="number" name="wifi" value={formData.wifi} onChange={handleChange} style={control} /></Field>
+            <Field label="Internet xərci"><input type="number" name="wifi" value={formData.wifi} onChange={handleChange} style={control} /></Field>
             <div />
           </Row>
           <button type="submit" style={button}>Yadda Saxla</button>
@@ -121,7 +134,7 @@ function AdminOnly() {
           <table style={table}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['İl', 'Ay', 'Ev', 'Kiraye', 'İşıq', 'Su', 'Internet', 'Total'].map((x) => <th key={x} style={th}>{x}</th>)}
+                {['İl', 'Ay', 'Ev', 'Kiraye', 'İşıq xərci', 'Su xərci', 'Internet xərci', 'Net'].map((x) => <th key={x} style={th}>{x}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -134,7 +147,7 @@ function AdminOnly() {
                   <td style={td}>{formatMoney(item.isiqPulu)}</td>
                   <td style={td}>{formatMoney(item.suCem)}</td>
                   <td style={td}>{formatMoney(item.wifi)}</td>
-                  <td style={td}>{formatMoney(item.total)}</td>
+                  <td style={td}>{formatMoney(netReportTotal(item))}</td>
                 </tr>
               ))}
             </tbody>
@@ -160,5 +173,23 @@ const Row = ({ children }) => <div style={rowStyle}>{children}</div>;
 const Field = ({ label, children }) => <div><label style={{ display: 'block', marginBottom: '5px', color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{label}</label>{children}</div>;
 const keyOf = (item) => `${item.id}-${item.il}-${item.ay}-${item.ev}`;
 const pill = (active) => ({ border: `1px solid ${theme.colors.border}`, background: active ? theme.colors.text : theme.colors.surface, color: active ? '#fff' : '#334155', borderRadius: theme.radius.pill, padding: '8px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 });
+
+function findLatestReport(data, il, ay, ev) {
+  return data
+    .filter((item) =>
+      Number(item.il) === Number(il) &&
+      String(item.ev).trim() === String(ev).trim() &&
+      String(item.ay).trim().toLowerCase() === String(ay).trim().toLowerCase())
+    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+}
+
+function findPreviousReport(data, il, ay, ev) {
+  const currentIndex = aylar.indexOf(ay);
+  if (currentIndex === -1) return null;
+
+  const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
+  const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
+  return findLatestReport(data, previousIl, previousAy, ev);
+}
 
 export default AdminOnly;

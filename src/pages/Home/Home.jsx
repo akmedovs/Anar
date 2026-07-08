@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { reportsApi, vehicleEventsApi, washExpensesApi, washWaterApi } from '../../api/reports';
-import { aylar, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
+import { aylar, cariIl, formatMoney, getYearOptions, netReportTotal, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 
 function Home() {
@@ -74,7 +74,7 @@ function Home() {
       const rows = source.filter((item) => item.ay === ay);
       return {
         label: ay.slice(0, 3),
-        value: rows.reduce((sum, item) => sum + toAmount(item.total), 0),
+        value: rows.reduce((sum, item) => sum + netReportTotal(item), 0),
       };
     });
   }, [data, secilenBaxis]);
@@ -84,15 +84,15 @@ function Home() {
     if (secilenBaxis === 'wash') {
       return [
         { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
-        { label: 'Isiq pulu', value: washTotals.isiq, color: theme.colors.amber },
+        { label: 'Isiq xerci', value: washTotals.isiq, color: theme.colors.amber },
       ];
     }
 
     return [
-      { label: 'Kiraye', value: totals.kiraye, color: theme.colors.primary },
-      { label: 'Isiq', value: totals.isiq, color: theme.colors.wash },
-      { label: 'Su', value: totals.su, color: theme.colors.info },
-      { label: 'Internet', value: totals.wifi, color: theme.colors.success },
+      { label: 'Kiraye geliri', value: totals.kiraye, color: theme.colors.primary },
+      { label: 'Isiq xerci', value: totals.isiq, color: theme.colors.wash },
+      { label: 'Su xerci', value: totals.su, color: theme.colors.info },
+      { label: 'Internet xerci', value: totals.wifi, color: theme.colors.success },
     ];
   }, [secilenBaxis, totals, washTotals]);
 
@@ -109,7 +109,7 @@ function Home() {
         <div>
           <div style={eyebrow}>ANALITIKA</div>
           <h1 style={title}>Dashboard</h1>
-          <p style={sub}>Kiraye ve aftoyuma geliri, ayliq trendler ve obyekt performansi</p>
+          <p style={sub}>Kiraye neti, aftoyuma xərcləri, aylıq trendlər və obyekt performansı</p>
         </div>
         <div style={filters}>
           <Field label="Il">
@@ -142,14 +142,14 @@ function Home() {
             <Kpi title="Bugunku masin" value={`${washDashboard.todayCount}`} note="giris qeydi" color={theme.colors.text} />
             <Kpi title={secilenAy === 'Bütün Aylar' ? 'Illik masin' : `${secilenAy} masin`} value={`${washDashboard.periodCount}`} note={`${secilenIl}`} color={theme.colors.primary} />
             <Kpi title="En cox masin" value={washDashboard.bestMonth.label} note={`${washDashboard.bestMonth.value} masin`} color={theme.colors.teal} />
-            <Kpi title="Isiq pulu" value={formatMoney(washTotals.isiq)} note={`${washTotals.serfiyyat.toFixed(2)} Kwt`} color={theme.colors.amber} />
+            <Kpi title="Isiq xerci" value={formatMoney(washTotals.isiq)} note={`${washTotals.serfiyyat.toFixed(2)} Kwt`} color={theme.colors.amber} />
             <Kpi title="Xercler" value={formatMoney(washDashboard.expenseTotal)} note="secilen dovr" color={theme.colors.wash} />
           </>
         ) : (
           <>
-            <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
-            <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />
-            {secilenBaxis !== 'rent' && <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />}
+            <Kpi title="Umumi net" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
+            <Kpi title="Kiraye neti" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />
+            {secilenBaxis !== 'rent' && <Kpi title="Aftoyuma xərci" value={formatMoney(washTotals.isiq)} note={`${washData.length} qeyd`} color={theme.colors.wash} />}
             <Kpi title="Ayliq orta" value={formatMoney(averageMonth)} note={`En yaxsi: ${bestMonth.label}`} color={theme.colors.teal} />
           </>
         )}
@@ -168,7 +168,7 @@ function Home() {
               <Donut segments={buildRevenueSegments(secilenBaxis, rentTotals, washTotals)} total={totals.total} />
             </Panel>
 
-            <Panel title="Xerc ve gelir terkibi">
+            <Panel title="Gəlir və xərc tərkibi">
               <StackList data={composition} total={Math.max(totals.kiraye + totals.isiq + totals.su + totals.wifi, 1)} />
             </Panel>
 
@@ -180,10 +180,10 @@ function Home() {
           <section style={detailGrid}>
             <Panel title="Operativ xulase">
               <div style={metricRows}>
-                <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />
-                <Metric label="Isiq pulu" value={formatMoney(totals.isiq)} />
-                <Metric label="Su" value={formatMoney(totals.su)} />
-                <Metric label="Internet" value={formatMoney(totals.wifi)} />
+                <Metric label="Kiraye gəliri" value={formatMoney(totals.kiraye)} />
+                <Metric label="Isiq xərci" value={formatMoney(totals.isiq)} />
+                <Metric label="Su xərci" value={formatMoney(totals.su)} />
+                <Metric label="Internet xərci" value={formatMoney(totals.wifi)} />
                 <Metric label="Serfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} />
               </div>
             </Panel>
@@ -203,17 +203,22 @@ function isWashReport(item) {
 }
 
 function buildRevenueSegments(view, rentTotals, washTotals) {
+  const rentExpenses = rentTotals.isiq + rentTotals.su + rentTotals.wifi;
+
   if (view === 'rent') {
-    return [{ label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary }];
+    return [
+      { label: 'Kiraye geliri', value: rentTotals.kiraye, color: theme.colors.primary },
+      { label: 'Xercler', value: rentExpenses, color: theme.colors.wash },
+    ];
   }
 
   if (view === 'wash') {
-    return [{ label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash }];
+    return [{ label: 'Aftoyuma xerci', value: washTotals.isiq, color: theme.colors.wash }];
   }
 
   return [
-    { label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary },
-    { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
+    { label: 'Kiraye geliri', value: rentTotals.kiraye, color: theme.colors.primary },
+    { label: 'Xercler', value: rentExpenses + washTotals.isiq, color: theme.colors.wash },
   ];
 }
 
@@ -261,7 +266,7 @@ function summarize(items) {
       isiq: acc.isiq + toAmount(item.isiqPulu),
       su: acc.su + toAmount(item.suCem),
       wifi: acc.wifi + toAmount(item.wifi),
-      total: acc.total + toAmount(item.total),
+      total: acc.total + netReportTotal(item),
       serfiyyat: acc.serfiyyat + toAmount(item.serfiyyat),
     }),
     { kiraye: 0, isiq: 0, su: 0, wifi: 0, total: 0, serfiyyat: 0 },
@@ -270,7 +275,7 @@ function summarize(items) {
 
 function buildHouseTotals(items) {
   const grouped = items.reduce((acc, item) => {
-    acc[item.ev] = (acc[item.ev] || 0) + toAmount(item.total);
+    acc[item.ev] = (acc[item.ev] || 0) + netReportTotal(item);
     return acc;
   }, {});
 
@@ -311,7 +316,7 @@ function WashDashboard({ data, secilenIl, washTotals }) {
         <Panel title="Aftoyuma xerc xulasesi">
           <div style={metricRows}>
             <Metric label="Xercler" value={formatMoney(data.expenseTotal)} />
-            <Metric label="Isiq pulu" value={formatMoney(washTotals.isiq)} />
+            <Metric label="Isiq xerci" value={formatMoney(washTotals.isiq)} />
             <Metric label="Isiq serfiyyati" value={`${washTotals.serfiyyat.toFixed(2)} Kwt`} />
             <Metric label="Su pulu" value={formatMoney(data.waterTotal)} />
             <Metric label="Su serfiyyati" value={`${data.waterUsage.toFixed(2)} kub`} />
@@ -520,17 +525,17 @@ function DataTable({ rows, view }) {
         ['Kohne', (row) => Number(row.kohneIsiq).toFixed(2)],
         ['Yeni', (row) => Number(row.yeniIsiq).toFixed(2)],
         ['Serfiyyat', (row) => `${Number(row.serfiyyat).toFixed(2)} Kwt`],
-        ['Isiq pulu', (row) => formatMoney(row.isiqPulu)],
-        ['Total', (row) => formatMoney(row.total)],
+        ['Isiq xerci', (row) => formatMoney(row.isiqPulu)],
+        ['Net', (row) => formatMoney(netReportTotal(row))],
       ]
     : [
         ['Tarix', (row) => `${row.il} / ${row.ay}`],
         ['Obyekt', (row) => row.ev],
         ['Kiraye', (row) => formatMoney(row.kiraye)],
-        ['Isiq', (row) => formatMoney(row.isiqPulu)],
-        ['Su', (row) => formatMoney(row.suCem)],
-        ['Internet', (row) => formatMoney(row.wifi)],
-        ['Total', (row) => formatMoney(row.total)],
+        ['Isiq xərci', (row) => formatMoney(row.isiqPulu)],
+        ['Su xərci', (row) => formatMoney(row.suCem)],
+        ['Internet xərci', (row) => formatMoney(row.wifi)],
+        ['Net', (row) => formatMoney(netReportTotal(row))],
       ];
 
   return (

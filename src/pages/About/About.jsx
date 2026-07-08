@@ -158,7 +158,7 @@ function Aftoyuma() {
         isiqPulu: total,
         suCem: 0,
         wifi: 0,
-        total,
+        total: 0 - total,
       });
       setElectricForm((prev) => ({ ...prev, newReading: '' }));
       await loadAll();
@@ -192,7 +192,7 @@ function Aftoyuma() {
       <section style={summaryGrid}>
         <Summary title="Bugünkü maşın" value={`${todayEvents.length}`} color={theme.colors.text} />
         <Summary title={`${secilenAy} maşın`} value={`${filteredEvents.length}`} color={theme.colors.primary} />
-        <Summary title="İşıq pulu" value={formatMoney(monthlyElectricTotal)} color={theme.colors.amber} />
+        <Summary title="İşıq xərci" value={formatMoney(monthlyElectricTotal)} color={theme.colors.amber} />
         <Summary title="Aylıq xərclər" value={formatMoney(monthlyExpenseTotal)} color={theme.colors.wash} />
         <Summary title="Su pulu" value={formatMoney(monthlyWaterTotal)} color={theme.colors.teal} />
       </section>
@@ -316,7 +316,7 @@ function Aftoyuma() {
               ['Köhnə', (item) => Number(item.kohneIsiq).toFixed(2)],
               ['Yeni', (item) => Number(item.yeniIsiq).toFixed(2)],
               ['Sərfiyyat', (item) => Number(item.serfiyyat).toFixed(2)],
-              ['Total', (item) => formatMoney(item.isiqPulu)],
+              ['Xərc', (item) => formatMoney(item.isiqPulu)],
             ]}
           />
         </Panel>
