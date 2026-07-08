@@ -1,0 +1,19 @@
+{
+  "name": "Anar Kiraye ve Aftoyuma",
+  "short_name": "Anar",
+  "description": "Kiraye ve aftoyuma hesabat sistemi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#1f2937",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

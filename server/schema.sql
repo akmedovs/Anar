@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS reports (
+  id SERIAL PRIMARY KEY,
+  il INTEGER NOT NULL,
+  ay TEXT NOT NULL,
+  ev TEXT NOT NULL,
+  kiraye NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  kohne_isiq NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  yeni_isiq NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  serfiyyat NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  isiq_pulu NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  su_cem NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  wifi NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (il, ay, ev)
+);
+
+CREATE TABLE IF NOT EXISTS vehicle_events (
+  id SERIAL PRIMARY KEY,
+  plate TEXT NOT NULL DEFAULT '',
+  direction TEXT NOT NULL CHECK (direction IN ('entry', 'exit')),
+  source TEXT NOT NULL DEFAULT 'manual',
+  confidence NUMERIC(5, 4),
+  image_url TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
