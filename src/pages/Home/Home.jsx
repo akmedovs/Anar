@@ -30,22 +30,22 @@ function Home() {
       const monthMatch = secilenAy === 'Bütün Aylar' || String(item.ay).trim() === secilenAy;
       const typeMatch =
         secilenBaxis === 'all' ||
-        (secilenBaxis === 'rent' && item.ev !== 'MOYKA') ||
-        (secilenBaxis === 'wash' && item.ev === 'MOYKA');
+        (secilenBaxis === 'rent' && !isWashReport(item)) ||
+        (secilenBaxis === 'wash' && isWashReport(item));
       return monthMatch && typeMatch;
     });
   }, [data, secilenAy, secilenBaxis]);
 
-  const rentData = useMemo(() => filtered.filter((item) => item.ev !== 'MOYKA'), [filtered]);
-  const washData = useMemo(() => filtered.filter((item) => item.ev === 'MOYKA'), [filtered]);
+  const rentData = useMemo(() => filtered.filter((item) => !isWashReport(item)), [filtered]);
+  const washData = useMemo(() => filtered.filter(isWashReport), [filtered]);
   const totals = useMemo(() => summarize(filtered), [filtered]);
   const rentTotals = useMemo(() => summarize(rentData), [rentData]);
   const washTotals = useMemo(() => summarize(washData), [washData]);
 
   const monthlyTrend = useMemo(() => {
     const source = data.filter((item) => {
-      if (secilenBaxis === 'rent') return item.ev !== 'MOYKA';
-      if (secilenBaxis === 'wash') return item.ev === 'MOYKA';
+      if (secilenBaxis === 'rent') return !isWashReport(item);
+      if (secilenBaxis === 'wash') return isWashReport(item);
       return true;
     });
     return aylar.map((ay) => {
@@ -58,15 +58,21 @@ function Home() {
   }, [data, secilenBaxis]);
 
   const houseTotals = useMemo(() => buildHouseTotals(rentData), [rentData]);
-  const composition = useMemo(
-    () => [
+  const composition = useMemo(() => {
+    if (secilenBaxis === 'wash') {
+      return [
+        { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
+        { label: 'Isiq pulu', value: washTotals.isiq, color: theme.colors.amber },
+      ];
+    }
+
+    return [
       { label: 'Kiraye', value: totals.kiraye, color: theme.colors.primary },
       { label: 'Isiq', value: totals.isiq, color: theme.colors.wash },
       { label: 'Su', value: totals.su, color: theme.colors.info },
       { label: 'Internet', value: totals.wifi, color: theme.colors.success },
-    ],
-    [totals],
-  );
+    ];
+  }, [secilenBaxis, totals, washTotals]);
 
   const bestMonth = monthlyTrend.reduce((best, item) => (item.value > best.value ? item : best), { label: '-', value: 0 });
   const averageMonth = monthlyTrend.length ? monthlyTrend.reduce((sum, item) => sum + item.value, 0) / monthlyTrend.length : 0;
@@ -106,8 +112,8 @@ function Home() {
 
       <section style={kpiGrid}>
         <Kpi title="Umumi gelir" value={formatMoney(totals.total)} note={`${filtered.length} qeyd`} color={theme.colors.text} />
-        <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />
-        <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />
+        {secilenBaxis !== 'wash' && <Kpi title="Kiraye geliri" value={formatMoney(rentTotals.total)} note={`${rentData.length} qeyd`} color={theme.colors.primary} />}
+        {secilenBaxis !== 'rent' && <Kpi title="Aftoyuma geliri" value={formatMoney(washTotals.total)} note={`${washData.length} qeyd`} color={theme.colors.wash} />}
         <Kpi title="Ayliq orta" value={formatMoney(averageMonth)} note={`En yaxsi: ${bestMonth.label}`} color={theme.colors.teal} />
       </section>
 
@@ -117,38 +123,56 @@ function Home() {
         </Panel>
 
         <Panel title="Gelir payi">
-          <Donut segments={[
-            { label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary },
-            { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
-          ]} total={totals.total} />
+          <Donut segments={buildRevenueSegments(secilenBaxis, rentTotals, washTotals)} total={totals.total} />
         </Panel>
 
         <Panel title="Xerc ve gelir terkibi">
           <StackList data={composition} total={Math.max(totals.kiraye + totals.isiq + totals.su + totals.wifi, 1)} />
         </Panel>
 
-        <Panel title="Evler uzre ranking">
-          <Ranking data={houseTotals} />
-        </Panel>
+        {secilenBaxis !== 'wash' && (
+          <Panel title="Evler uzre ranking">
+            <Ranking data={houseTotals} />
+          </Panel>
+        )}
       </section>
 
       <section style={detailGrid}>
         <Panel title="Operativ xulase">
           <div style={metricRows}>
-            <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />
+            {secilenBaxis !== 'wash' && <Metric label="Kiraye cem" value={formatMoney(totals.kiraye)} />}
             <Metric label="Isiq pulu" value={formatMoney(totals.isiq)} />
-            <Metric label="Su" value={formatMoney(totals.su)} />
-            <Metric label="Internet" value={formatMoney(totals.wifi)} />
+            {secilenBaxis !== 'wash' && <Metric label="Su" value={formatMoney(totals.su)} />}
+            {secilenBaxis !== 'wash' && <Metric label="Internet" value={formatMoney(totals.wifi)} />}
             <Metric label="Serfiyyat" value={`${totals.serfiyyat.toFixed(2)} Kwt`} />
           </div>
         </Panel>
 
         <Panel title="Son hesabatlar" wide>
-          <DataTable rows={filtered.slice(0, 12)} />
+          <DataTable rows={filtered.slice(0, 12)} view={secilenBaxis} />
         </Panel>
       </section>
     </div>
   );
+}
+
+function isWashReport(item) {
+  return String(item.ev || '').trim().toUpperCase() === 'MOYKA';
+}
+
+function buildRevenueSegments(view, rentTotals, washTotals) {
+  if (view === 'rent') {
+    return [{ label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary }];
+  }
+
+  if (view === 'wash') {
+    return [{ label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash }];
+  }
+
+  return [
+    { label: 'Kiraye', value: rentTotals.total, color: theme.colors.primary },
+    { label: 'Aftoyuma', value: washTotals.total, color: theme.colors.wash },
+  ];
 }
 
 function summarize(items) {
@@ -312,15 +336,35 @@ function Legend({ color, label, value }) {
   );
 }
 
-function DataTable({ rows }) {
+function DataTable({ rows, view }) {
   if (!rows.length) return <Empty />;
+
+  const columns = view === 'wash'
+    ? [
+        ['Tarix', (row) => `${row.il} / ${row.ay}`],
+        ['Obyekt', (row) => row.ev],
+        ['Kohne', (row) => Number(row.kohneIsiq).toFixed(2)],
+        ['Yeni', (row) => Number(row.yeniIsiq).toFixed(2)],
+        ['Serfiyyat', (row) => `${Number(row.serfiyyat).toFixed(2)} Kwt`],
+        ['Isiq pulu', (row) => formatMoney(row.isiqPulu)],
+        ['Total', (row) => formatMoney(row.total)],
+      ]
+    : [
+        ['Tarix', (row) => `${row.il} / ${row.ay}`],
+        ['Obyekt', (row) => row.ev],
+        ['Kiraye', (row) => formatMoney(row.kiraye)],
+        ['Isiq', (row) => formatMoney(row.isiqPulu)],
+        ['Su', (row) => formatMoney(row.suCem)],
+        ['Internet', (row) => formatMoney(row.wifi)],
+        ['Total', (row) => formatMoney(row.total)],
+      ];
 
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={table}>
         <thead>
           <tr>
-            {['Tarix', 'Obyekt', 'Kiraye', 'Isiq', 'Su', 'Internet', 'Total'].map((label) => (
+            {columns.map(([label]) => (
               <th key={label} style={th}>{label}</th>
             ))}
           </tr>
@@ -328,13 +372,11 @@ function DataTable({ rows }) {
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${row.id}-${index}`} style={{ background: index % 2 ? '#f8fafc' : '#fff' }}>
-              <td style={td}>{row.il} / {row.ay}</td>
-              <td style={td}>{row.ev}</td>
-              <td style={td}>{formatMoney(row.kiraye)}</td>
-              <td style={td}>{formatMoney(row.isiqPulu)}</td>
-              <td style={td}>{formatMoney(row.suCem)}</td>
-              <td style={td}>{formatMoney(row.wifi)}</td>
-              <td style={{ ...td, fontWeight: 800 }}>{formatMoney(row.total)}</td>
+              {columns.map(([label, accessor]) => (
+                <td key={label} style={{ ...td, fontWeight: label === 'Total' ? 800 : 400 }}>
+                  {accessor(row)}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
