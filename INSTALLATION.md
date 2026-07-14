@@ -1,48 +1,33 @@
 # Ubuntu Server Installation
 
-Bu sənəd `Anar` layihəsini Ubuntu serverdə sıfırdan qaldırmaq üçün hazırlanıb.
+Bu sənəd `Anar` layihəsini Ubuntu serverdə Docker ilə sıfırdan qaldırmaq üçündür.
 
 ## 1. Server hazırlığı
 
 ```bash
 sudo apt update
-sudo apt install -y git curl nginx python3 python3-pip tesseract-ocr postgresql postgresql-contrib
+sudo apt install -y ca-certificates curl gnupg git
 ```
 
-Node.js 20 qur:
+## 2. Docker qur
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+curl -fsSL https://get.docker.com | sudo sh
 ```
 
-PM2 qur:
+Docker Compose pluginini yoxla:
 
 ```bash
-sudo npm install -g pm2
+docker compose version
 ```
 
-## 2. PostgreSQL hazırla
-
-```bash
-sudo systemctl enable postgresql
-sudo systemctl start postgresql
-```
+İstəsən istifadəçini docker qrupuna da əlavə et:
 
 ```bash
-sudo -u postgres psql
+sudo usermod -aG docker $USER
 ```
 
-```sql
-CREATE DATABASE anar;
-CREATE USER anar_user WITH PASSWORD 'GUCLU_PAROL_YAZ';
-GRANT ALL PRIVILEGES ON DATABASE anar TO anar_user;
-\c anar
-GRANT ALL ON SCHEMA public TO anar_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anar_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anar_user;
-\q
-```
+Sonra sessiyanı yenilə.
 
 ## 3. Layihəni serverə çək
 
@@ -52,92 +37,24 @@ git clone https://github.com/akmedovs/Anar.git
 cd Anar
 ```
 
-## 4. Faylları hazırla
+## 4. Konteynerləri qaldır
 
 ```bash
-npm install
-cp .env.example .env
+docker compose up -d --build
 ```
 
-`.env` içində minimum bunlar olsun:
+## 5. Yoxlama
+
+Frontend:
 
 ```bash
-PORT=3001
-DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar
-VEHICLE_VISION_COMMAND=python3
-VEHICLE_YOLO_MODEL=
-VEHICLE_YOLO_CONF=0.25
-VEHICLE_OCR_CONFIG=--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
+curl http://127.0.0.1:8080
 ```
 
-## 5. Build et
+API health:
 
 ```bash
-npm run build
-```
-
-## 6. Backend-i başlat
-
-```bash
-PORT=3001 DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar pm2 start server/server.js --name anar-api
-pm2 save
-pm2 startup
-```
-
-PM2 son sətirdən sonra verdiyi əlavə `sudo` komandasını da işlət.
-
-## 7. Nginx əlavə et
-
-```bash
-sudo nano /etc/nginx/sites-available/anar
-```
-
-Bu config-i yaz:
-
-```nginx
-server {
-    listen 80;
-    server_name example.com;
-
-    root /var/www/Anar/dist;
-    index index.html;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3001/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /uploads/ {
-        proxy_pass http://127.0.0.1:3001/uploads/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
-Aktiv et:
-
-```bash
-sudo ln -s /etc/nginx/sites-available/anar /etc/nginx/sites-enabled/anar
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-## 8. Yoxla
-
-```bash
-curl http://127.0.0.1:3001/api/health
+curl http://127.0.0.1:8080/api/health
 ```
 
 Gözlənən cavab:
@@ -146,23 +63,37 @@ Gözlənən cavab:
 {"ok":true,"database":"postgresql"}
 ```
 
-## 9. Backup
-
-Backup:
+## 6. Dayandırmaq
 
 ```bash
-pg_dump -Fc "postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar" > /var/backups/anar.dump
+docker compose down
+```
+
+## 7. Backup
+
+PostgreSQL backup:
+
+```bash
+docker compose exec db pg_dump -U anar_user anar > anar.dump
 ```
 
 Restore:
 
 ```bash
-pg_restore -d anar /var/backups/anar.dump
+cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
 ```
+
+## 8. Domen bağlamaq istəyirsənsə
+
+Ən sadə ssenari:
+
+- DNS `glossgarage.az` -> server IP
+- reverse proxy `glossgarage.az` -> `127.0.0.1:8080`
+
+Bu repo içində `web` konteyner artıq `api`-yə proxy edir, ona görə əlavə backend proxy lazımdır.
 
 ## Qeyd
 
-- `npm run dev` development üçün həm backend, həm frontend-i birlikdə açır.
-- `npm run build` production build yaradır.
-- `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
-- Recognition istifadə edəcəksənsə, Python OCR paketlərini ayrıca qur.
+- `pm2` istifadə olunmur.
+- Ayrı `npm run dev` mərhələsi yoxdur.
+- Hər şey Docker Compose ilə qalxır.
