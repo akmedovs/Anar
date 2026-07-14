@@ -1,38 +1,46 @@
 # Anar
 
-Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi.
+Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + PostgreSQL layihəsi.
 
-## Cari quruluş
+## Layihə nədir
 
 - Frontend: React + Vite
-- Backend: Node.js HTTP server
+- Backend: Node.js
 - Storage: PostgreSQL
 - Opsional: vehicle recognition üçün Python skripti
 
-## Lazım olanlar
+## Lokal işlətmə
 
-- Node.js 20 və ya daha yeni
-- npm
-- Git
-- PostgreSQL 14 və ya daha yeni
-- Opsional recognition üçün:
-  - Python 3
-  - `pip`
-  - `tesseract-ocr`
-  - `opencv-python`
-  - `ultralytics`
-  - `pytesseract`
+Bu hissə development üçün nəzərdə tutulub. `npm run dev` həm backend-i, həm də frontend-i qaldırır.
 
-## Lokal işə salma
+1. Layihəni klonla.
 
 ```bash
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
+```
+
+2. Asılılıqları qur.
+
+```bash
 npm install
+```
+
+3. `.env` faylını hazırla.
+
+```bash
+cp .env.example .env
+```
+
+4. PostgreSQL işləsin və `.env` içində `DATABASE_URL` doğru olsun.
+
+5. Layihəni başlad.
+
+```bash
 npm run dev
 ```
 
-Default portlar:
+Gözlənən ünvanlar:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3001`
@@ -43,55 +51,192 @@ Health check:
 curl http://localhost:3001/api/health
 ```
 
+## Build
+
+Production build üçün:
+
+```bash
+npm run build
+```
+
+Yoxlama üçün:
+
+```bash
+npm run server
+```
+
+## Ubuntu serverdə qaldırma
+
+Bu sıra ilə işlət:
+
+1. Sistem paketlərini qur.
+
+```bash
+sudo apt update
+sudo apt install -y git curl nginx python3 python3-pip tesseract-ocr postgresql postgresql-contrib
+```
+
+2. Node.js 20 qur.
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+3. PM2 qur.
+
+```bash
+sudo npm install -g pm2
+```
+
+4. PostgreSQL-i işə sal.
+
+```bash
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+5. Database və user yarat.
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE DATABASE anar;
+CREATE USER anar_user WITH PASSWORD 'GUCLU_PAROL_YAZ';
+GRANT ALL PRIVILEGES ON DATABASE anar TO anar_user;
+\c anar
+GRANT ALL ON SCHEMA public TO anar_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anar_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anar_user;
+\q
+```
+
+6. Layihəni serverə çək.
+
+```bash
+cd /var/www
+git clone https://github.com/akmedovs/Anar.git
+cd Anar
+```
+
+7. Asılılıqları qur.
+
+```bash
+npm install
+```
+
+8. `.env` faylını hazırla.
+
+```bash
+cp .env.example .env
+```
+
+9. `.env` içində minimum bunlar olsun.
+
+```bash
+PORT=3001
+DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar
+VEHICLE_VISION_COMMAND=python3
+VEHICLE_YOLO_MODEL=
+VEHICLE_YOLO_CONF=0.25
+VEHICLE_OCR_CONFIG=--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
+```
+
+10. Build et.
+
+```bash
+npm run build
+```
+
+11. Backend-i PM2 ilə başlat.
+
+```bash
+PORT=3001 DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar pm2 start server/server.js --name anar-api
+pm2 save
+pm2 startup
+```
+
+12. PM2-nin verdiyi əlavə `sudo` komandasını da işlə.
+
+13. Nginx qur.
+
+```bash
+sudo nano /etc/nginx/sites-available/anar
+```
+
+Bu config-i yaz:
+
+```nginx
+server {
+    listen 80;
+    server_name example.com;
+
+    root /var/www/Anar/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:3001/uploads/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+14. Nginx-i aktiv et.
+
+```bash
+sudo ln -s /etc/nginx/sites-available/anar /etc/nginx/sites-enabled/anar
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+15. Health check et.
+
+```bash
+curl http://127.0.0.1:3001/api/health
+```
+
 Gözlənən cavab:
 
 ```json
 {"ok":true,"database":"postgresql"}
 ```
 
-## Production
+## Backup
 
-Bu repo PostgreSQL backend + static build modeli ilə işləyir.
-
-```bash
-npm install
-npm run build
-```
-
-Frontend build `dist/` qovluğuna yazılır. Backend üçün:
+Database backup:
 
 ```bash
-npm run server
+pg_dump -Fc "postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar" > /var/backups/anar.dump
 ```
 
-Production-da ən sadə model:
-
-- `server/server.js` prosesi PM2 ilə işləsin
-- `dist/` qovluğunu Nginx servis etsin
-- `/api/*` sorğuları `127.0.0.1:3001`-ə proxy olunsun
-- Data backup üçün `pg_dump` istifadə olunsun
-
-Ubuntu üçün tam ardıcıllıq `INSTALLATION.md` faylında verilib.
-
-## Environment
-
-`.env.example` faylından başlayın:
+Restore:
 
 ```bash
-cp .env.example .env
+pg_restore -d anar /var/backups/anar.dump
 ```
 
-Əsas dəyişənlər:
+## Qeyd
 
-- `DATABASE_URL` - PostgreSQL connection string
-- `PORT` - backend portu, default `3001`
-- `VEHICLE_VISION_COMMAND` - python icraçı yolu, default `python3`
-- `VEHICLE_YOLO_MODEL` - vehicle detector model yolu
-- `VEHICLE_YOLO_CONF` - detector confidence, default `0.25`
-- `VEHICLE_OCR_CONFIG` - Tesseract OCR config
-
-## Qeydlər
-
-- Backend artıq PostgreSQL istifadə edir.
+- `npm run dev` development üçündür.
+- `npm run build` production build üçündür.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
-- Recognition feature istifadə etmirsinizsə, Python/OCR paketləri tələb olunmur.
+- Recognition feature istifadə edirsənsə, Python paketlərini ayrıca qur.

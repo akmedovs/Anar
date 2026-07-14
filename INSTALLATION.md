@@ -1,48 +1,28 @@
 # Ubuntu Server Installation
 
-Bu sənəd `Anar` layihəsini Ubuntu serverdə PostgreSQL ilə ayağa qaldırmaq üçündür.
+Bu sənəd `Anar` layihəsini Ubuntu serverdə sıfırdan qaldırmaq üçün hazırlanıb.
 
-## Tövsiyə olunan resurslar
-
-### Minimum
-
-- 1 vCPU
-- 2 GB RAM
-- 20 GB SSD
-
-### Tövsiyə olunan
-
-- 2 vCPU
-- 4 GB RAM
-- 40 GB SSD
-
-### Recognition aktiv olacaqsa
-
-- 2 vCPU
-- 4 GB RAM minimum
-- 50 GB SSD daha rahatdır
-
-## Server paketləri
+## 1. Server hazırlığı
 
 ```bash
 sudo apt update
 sudo apt install -y git curl nginx python3 python3-pip tesseract-ocr postgresql postgresql-contrib
 ```
 
-Node.js 20:
+Node.js 20 qur:
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-PM2:
+PM2 qur:
 
 ```bash
 sudo npm install -g pm2
 ```
 
-## PostgreSQL qur
+## 2. PostgreSQL hazırla
 
 ```bash
 sudo systemctl enable postgresql
@@ -64,39 +44,39 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anar_user;
 \q
 ```
 
-## Layihəni çək
+## 3. Layihəni serverə çək
 
 ```bash
 cd /var/www
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
-npm install
 ```
 
-## Environment
+## 4. Faylları hazırla
 
 ```bash
+npm install
 cp .env.example .env
 ```
 
-`.env` içində əsas dəyərlər:
+`.env` içində minimum bunlar olsun:
 
 ```bash
 PORT=3001
 DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar
 VEHICLE_VISION_COMMAND=python3
-VEHICLE_YOLO_MODEL=/var/www/Anar/models/plate-yolo.pt
+VEHICLE_YOLO_MODEL=
 VEHICLE_YOLO_CONF=0.25
 VEHICLE_OCR_CONFIG=--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
 ```
 
-## Build
+## 5. Build et
 
 ```bash
 npm run build
 ```
 
-## Backend-i başlat
+## 6. Backend-i başlat
 
 ```bash
 PORT=3001 DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar pm2 start server/server.js --name anar-api
@@ -104,11 +84,15 @@ pm2 save
 pm2 startup
 ```
 
-PM2-nin verdiyi əlavə `sudo` komandasını da icra et.
+PM2 son sətirdən sonra verdiyi əlavə `sudo` komandasını da işlət.
 
-## Nginx
+## 7. Nginx əlavə et
 
-`/etc/nginx/sites-available/anar`:
+```bash
+sudo nano /etc/nginx/sites-available/anar
+```
+
+Bu config-i yaz:
 
 ```nginx
 server {
@@ -142,7 +126,7 @@ server {
 }
 ```
 
-Enable:
+Aktiv et:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/anar /etc/nginx/sites-enabled/anar
@@ -150,7 +134,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## Yoxlama
+## 8. Yoxla
 
 ```bash
 curl http://127.0.0.1:3001/api/health
@@ -162,7 +146,9 @@ Gözlənən cavab:
 {"ok":true,"database":"postgresql"}
 ```
 
-## Backup
+## 9. Backup
+
+Backup:
 
 ```bash
 pg_dump -Fc "postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar" > /var/backups/anar.dump
@@ -174,18 +160,9 @@ Restore:
 pg_restore -d anar /var/backups/anar.dump
 ```
 
-## Recognition paketləri
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install opencv-python ultralytics pytesseract
-```
-
 ## Qeyd
 
-- Data PostgreSQL-də saxlanır.
-- `server/uploads/` serverdə qalıcı saxlanmalıdır.
-- Köhnə `server/db.json` varsa, ilk startda avtomatik import edilir.
-
+- `npm run dev` development üçün həm backend, həm frontend-i birlikdə açır.
+- `npm run build` production build yaradır.
+- `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
+- Recognition istifadə edəcəksənsə, Python OCR paketlərini ayrıca qur.
