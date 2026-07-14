@@ -1,35 +1,30 @@
 # Anar
 
-Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi.
+Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + PostgreSQL layihəsi.
 
-## Layihə nədir
+## Nə var
 
-Bu repo avtomatik hesabatlar, aftoyuma üçün maşın girişləri və kameradan tanıma axını üçün hazırlanıb.
-
-## Texnologiyalar
-
-- Frontend: React + Vite
-- Backend: Node.js HTTP server
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3001`
 - Database: PostgreSQL
-- Opsional: vehicle recognition üçün Python skripti
+- Opsional: vehicle recognition üçün Python skripti və onun Docker image-i daxilindəki paketləri
 
-## Lokal işlətmə
+## Docker ilə işə salma
 
-Layihə lokalda belə açılır:
+Ən sadə işə salma:
 
 ```bash
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
-npm install
-npm run dev
+docker compose up -d --build
 ```
 
-Default portlar:
+Sonra:
 
 - Frontend: `http://localhost:5173`
-- Backend: `http://localhost:3001`
+- Backend health: `http://localhost:3001/api/health`
 
-Health check:
+## Lokalda yoxlama
 
 ```bash
 curl http://localhost:3001/api/health
@@ -41,37 +36,35 @@ Gözlənən cavab:
 {"ok":true,"database":"postgresql"}
 ```
 
-## Ayrı-ayrı işə salmaq
+## Docker komandaları
 
-Əgər frontend və backend-i ayrı açmaq istəyirsənsə:
+Konteynerlərə bax:
 
 ```bash
-npm install
+docker compose ps
 ```
 
-Backend:
+Loglara bax:
 
 ```bash
-npm run server
+docker compose logs -f
 ```
 
-Frontend:
+Dayandır:
 
 ```bash
-npm run client
+docker compose down
 ```
 
-## Build
-
-Production build:
+Tam sıfırlama:
 
 ```bash
-npm run build
+docker compose down -v
 ```
 
 ## Environment
 
-`.env.example` faylından başla:
+`.env.example`-dən başla:
 
 ```bash
 cp .env.example .env
@@ -79,32 +72,30 @@ cp .env.example .env
 
 Əsas dəyişənlər:
 
-- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_URL`
 - `PORT` - backend portu, default `3001`
-- `VEHICLE_VISION_COMMAND` - python icraçı yolu, default `python3`
-- `VEHICLE_YOLO_MODEL` - vehicle detector model yolu
-- `VEHICLE_YOLO_CONF` - detector confidence, default `0.25`
-- `VEHICLE_OCR_CONFIG` - Tesseract OCR config
+- `VEHICLE_VISION_COMMAND` - default `python3`
+- `VEHICLE_YOLO_MODEL`
+- `VEHICLE_YOLO_CONF`
+- `VEHICLE_OCR_CONFIG`
 
-## Production
+## Yedəkləmə
 
-Production üçün tipik sıra:
+Backup:
 
 ```bash
-npm install
-npm run build
-npm run server
+docker compose exec db pg_dump -U anar_user anar > anar.dump
 ```
 
-Production-da tövsiyə olunan model:
+Restore:
 
-- `server/server.js` prosesi ayrıca servisdə işləsin
-- `dist/` qovluğunu Nginx servis etsin
-- `/api/*` sorğuları `127.0.0.1:3001`-ə proxy olunsun
-- Backup üçün `pg_dump` istifadə olunsun
+```bash
+cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
+```
 
 ## Qeydlər
 
-- Backend artıq PostgreSQL istifadə edir.
+- `web` konteyneri frontend-i `5173`-də açır.
+- `api` konteyneri backend-i `3001`-də açır.
+- `db` konteyneri PostgreSQL saxlayır.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
-- Recognition feature istifadə etmirsənsə, Python/OCR paketləri lazım deyil.

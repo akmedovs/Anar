@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: anar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: anar
+      POSTGRES_USER: anar_user
+      POSTGRES_PASSWORD: GUCLU_PAROL_YAZ
+    volumes:
+      - anar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anar_user -d anar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: anar-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://anar_user:GUCLU_PAROL_YAZ@db:5432/anar
+      VEHICLE_VISION_COMMAND: python3
+      VEHICLE_YOLO_MODEL: ""
+      VEHICLE_YOLO_CONF: 0.25
+      VEHICLE_OCR_CONFIG: --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
+    volumes:
+      - anar_uploads:/app/server/uploads
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: anar-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  anar_pgdata:
+  anar_uploads:
+
