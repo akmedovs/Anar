@@ -1,70 +1,64 @@
 # Anar
 
-Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + PostgreSQL layihəsi.
+Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi.
 
-## Layihə quruluşu
+## Layihə nədir
 
-- Frontend: Vite, `http://localhost:5173`
-- Backend: Node.js, `http://localhost:3001`
+Bu repo avtomatik hesabatlar, aftoyuma üçün maşın girişləri və kameradan tanıma axını üçün hazırlanıb.
+
+## Texnologiyalar
+
+- Frontend: React + Vite
+- Backend: Node.js HTTP server
 - Database: PostgreSQL
+- Opsional: vehicle recognition üçün Python skripti
 
-`vite.config.js` API sorğularını `127.0.0.1:3001`-ə proxy edir.
+## Lokal işlətmə
 
-## Lokal istifadə
-
-Bu layihəni lokalda 2 formada işlədə bilərsən.
-
-### Variant 1: tək komanda
-
-Bu komanda backend və frontend-i birlikdə qaldırır:
+Layihə lokalda belə açılır:
 
 ```bash
+git clone https://github.com/akmedovs/Anar.git
+cd Anar
+npm install
 npm run dev
 ```
 
-Sonra bunlar açıq olur:
+Default portlar:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3001`
 
-### Variant 2: ayrı-ayrı işlətmək
-
-1. Asılılıqları qur.
-
-```bash
-npm install
-```
-
-2. `.env` faylını hazırla.
-
-```bash
-cp .env.example .env
-```
-
-3. Bir terminalda backend-i aç.
-
-```bash
-npm run server
-```
-
-4. Başqa terminalda frontend-i aç.
-
-```bash
-npm run client
-```
-
-## Yoxlama
-
-Backend health:
+Health check:
 
 ```bash
 curl http://localhost:3001/api/health
 ```
 
+Gözlənən cavab:
+
+```json
+{"ok":true,"database":"postgresql"}
+```
+
+## Ayrı-ayrı işə salmaq
+
+Əgər frontend və backend-i ayrı açmaq istəyirsənsə:
+
+```bash
+npm install
+```
+
+Backend:
+
+```bash
+npm run server
+```
+
 Frontend:
 
-```text
-http://localhost:5173
+```bash
+npm run client
 ```
 
 ## Build
@@ -75,59 +69,42 @@ Production build:
 npm run build
 ```
 
-## Docker ilə işlətmək
+## Environment
 
-Bu repo üçün Docker production axını da var.
-
-```bash
-docker compose up -d --build
-```
-
-Docker-da:
-
-- public web giriş: `http://localhost:8080`
-- API: konteyner içində `3001`
-- PostgreSQL: `db` servisində
-
-Yoxlama:
+`.env.example` faylından başla:
 
 ```bash
-curl http://localhost:8080/api/health
+cp .env.example .env
 ```
 
-## Ubuntu serverdə qaldırmaq
+Əsas dəyişənlər:
 
-Əgər serverdə Docker istifadə edəcəksənsə, `INSTALLATION.md`-ə bax:
+- `DATABASE_URL` - PostgreSQL connection string
+- `PORT` - backend portu, default `3001`
+- `VEHICLE_VISION_COMMAND` - python icraçı yolu, default `python3`
+- `VEHICLE_YOLO_MODEL` - vehicle detector model yolu
+- `VEHICLE_YOLO_CONF` - detector confidence, default `0.25`
+- `VEHICLE_OCR_CONFIG` - Tesseract OCR config
+
+## Production
+
+Production üçün tipik sıra:
 
 ```bash
-cat INSTALLATION.md
+npm install
+npm run build
+npm run server
 ```
 
-Qısa fikir:
+Production-da tövsiyə olunan model:
 
-```bash
-git clone https://github.com/akmedovs/Anar.git
-cd Anar
-docker compose up -d --build
-```
+- `server/server.js` prosesi ayrıca servisdə işləsin
+- `dist/` qovluğunu Nginx servis etsin
+- `/api/*` sorğuları `127.0.0.1:3001`-ə proxy olunsun
+- Backup üçün `pg_dump` istifadə olunsun
 
-## Backup
+## Qeydlər
 
-PostgreSQL backup:
-
-```bash
-docker compose exec db pg_dump -U anar_user anar > anar.dump
-```
-
-Restore:
-
-```bash
-cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
-```
-
-## Qeyd
-
-- `npm run dev` development üçün ən rahat yoldur.
-- `npm run client` frontend-i, `npm run server` backend-i ayrıca açır.
-- `pm2` istifadə olunmur.
+- Backend artıq PostgreSQL istifadə edir.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
+- Recognition feature istifadə etmirsənsə, Python/OCR paketləri lazım deyil.
