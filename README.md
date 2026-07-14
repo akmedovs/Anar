@@ -1,14 +1,27 @@
-# Gloss Garage
+# Anar
 
-Sedan və cip yuma, nano, polirovka və ximcistka üçün sayt.
+Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi.
 
-## Nə var
+## Cari quruluş
 
-- Public website
-- Qiymət kataloqu
-- Şəkilli iş jurnalı
-- Admin panel
-- PostgreSQL backup-friendly data storage
+- Frontend: React + Vite
+- Backend: Node.js HTTP server
+- Storage: PostgreSQL
+- Opsional: vehicle recognition üçün Python skripti
+
+## Lazım olanlar
+
+- Node.js 20 və ya daha yeni
+- npm
+- Git
+- PostgreSQL 14 və ya daha yeni
+- Opsional recognition üçün:
+  - Python 3
+  - `pip`
+  - `tesseract-ocr`
+  - `opencv-python`
+  - `ultralytics`
+  - `pytesseract`
 
 ## Lokal işə salma
 
@@ -19,41 +32,66 @@ npm install
 npm run dev
 ```
 
-Frontend:
+Default portlar:
 
-```text
-http://localhost:5173
-```
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3001`
 
-Backend:
-
-```text
-http://localhost:3001
-```
-
-Health:
+Health check:
 
 ```bash
 curl http://localhost:3001/api/health
 ```
 
+Gözlənən cavab:
+
+```json
+{"ok":true,"database":"postgresql"}
+```
+
+## Production
+
+Bu repo PostgreSQL backend + static build modeli ilə işləyir.
+
+```bash
+npm install
+npm run build
+```
+
+Frontend build `dist/` qovluğuna yazılır. Backend üçün:
+
+```bash
+npm run server
+```
+
+Production-da ən sadə model:
+
+- `server/server.js` prosesi PM2 ilə işləsin
+- `dist/` qovluğunu Nginx servis etsin
+- `/api/*` sorğuları `127.0.0.1:3001`-ə proxy olunsun
+- Data backup üçün `pg_dump` istifadə olunsun
+
+Ubuntu üçün tam ardıcıllıq `INSTALLATION.md` faylında verilib.
+
 ## Environment
 
-`.env.example` faylını kopyala:
+`.env.example` faylından başlayın:
 
 ```bash
 cp .env.example .env
 ```
 
-Əsas dəyişən:
+Əsas dəyişənlər:
 
 - `DATABASE_URL` - PostgreSQL connection string
 - `PORT` - backend portu, default `3001`
-- `VEHICLE_VISION_COMMAND` - OCR skripti üçün python komandası
-- `VEHICLE_YOLO_MODEL` - plate detector model yolu
+- `VEHICLE_VISION_COMMAND` - python icraçı yolu, default `python3`
+- `VEHICLE_YOLO_MODEL` - vehicle detector model yolu
+- `VEHICLE_YOLO_CONF` - detector confidence, default `0.25`
+- `VEHICLE_OCR_CONFIG` - Tesseract OCR config
 
 ## Qeydlər
 
-- Data PostgreSQL-də saxlanır.
-- Köhnə `server/db.json` varsa, ilk startda import olunur.
-- İşlərə şəkil əlavə edilə bilər və admin paneldən xidmət qiymətləri dəyişilə bilər.
+- Backend artıq PostgreSQL istifadə edir.
+- `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
+- Recognition feature istifadə etmirsinizsə, Python/OCR paketləri tələb olunmur.
