@@ -8,9 +8,12 @@ html {
 
 body {
   margin: 0;
-  background: #f4f7fb;
-  color: #0f172a;
-  font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(20, 184, 166, 0.18), transparent 32%),
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 28%),
+    linear-gradient(180deg, #08101b 0%, #07111d 52%, #050a13 100%);
+  color: #f8fafc;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
   overflow-x: hidden;
 }
 
@@ -38,5 +41,5 @@ button {
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.18);
+  background: rgba(20, 184, 166, 0.24);
 }

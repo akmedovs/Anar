@@ -39,6 +39,7 @@ const port = Number(process.env.PORT) || 3001;
 const schemaFile = path.resolve(process.cwd(), 'server/schema.sql');
 const legacyDataFile = path.resolve(process.cwd(), 'server/db.json');
 const uploadsDir = path.resolve(process.cwd(), 'server/uploads/vehicle-captures');
+const glossGarageUploadsDir = path.resolve(process.cwd(), 'server/uploads/glossgarage');
 const visionScript = path.resolve(process.cwd(), 'server/vehicle-vision.py');
 const visionCommand = process.env.VEHICLE_VISION_COMMAND || 'python3';
 const visionModel = process.env.VEHICLE_YOLO_MODEL || '';
@@ -75,6 +76,24 @@ function normalizeDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
+
+function slugify(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || `service-${Date.now()}`;
+}
+
+const defaultGlossGarageServices = [
+  { title: 'Nano yuma', category: 'Xarici', sedan_price: 25, suv_price: 35, sort_order: 10 },
+  { title: 'Adi yuma', category: 'Xarici', sedan_price: 10, suv_price: 15, sort_order: 20 },
+  { title: 'Polirovka', category: 'Qayğı', sedan_price: 80, suv_price: 110, sort_order: 30 },
+  { title: 'Ximcistka', category: 'Daxili', sedan_price: 70, suv_price: 95, sort_order: 40 },
+  { title: 'Salon yuma', category: 'Daxili', sedan_price: 35, suv_price: 50, sort_order: 50 },
+  { title: 'Motor yuma', category: 'Texniki', sedan_price: 20, suv_price: 25, sort_order: 60 },
+];
 
 function normalizeLoadedState(parsed) {
   const reports = Array.isArray(parsed.reports) ? parsed.reports : [];
@@ -189,7 +208,8 @@ async function initializeDatabase() {
       (SELECT COUNT(*)::int FROM reports) AS reports_count,
       (SELECT COUNT(*)::int FROM vehicle_events) AS vehicle_events_count,
       (SELECT COUNT(*)::int FROM wash_expenses) AS wash_expenses_count,
-      (SELECT COUNT(*)::int FROM wash_water_readings) AS wash_water_readings_count
+      (SELECT COUNT(*)::int FROM wash_water_readings) AS wash_water_readings_count,
+      (SELECT COUNT(*)::int FROM glossgarage_services) AS services_count
   `);
 
   const hasData = Object.values(counts[0] || {}).some((value) => Number(value) > 0);
@@ -202,6 +222,11 @@ async function initializeDatabase() {
         console.warn(`Legacy JSON migration skipped: ${error.message}`);
       }
     }
+  }
+
+  const servicesCount = Number(counts[0]?.services_count || 0);
+  if (servicesCount === 0) {
+    await seedGlossGarageServices();
   }
 }
 
@@ -305,6 +330,33 @@ function getPool() {
 
 async function query(sql, params = []) {
   return getPool().query(sql, params);
+}
+
+async function seedGlossGarageServices() {
+  const client = getPool();
+
+  for (const [index, service] of defaultGlossGarageServices.entries()) {
+    await client.query(
+      `
+        INSERT INTO glossgarage_services (
+          slug, title, category, sedan_price, suv_price, notes, active, sort_order, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (slug) DO NOTHING
+      `,
+      [
+        slugify(service.title),
+        service.title,
+        service.category,
+        service.sedan_price,
+        service.suv_price,
+        '',
+        true,
+        service.sort_order || index * 10,
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
+    );
+  }
 }
 
 function toNumber(value) {
@@ -439,7 +491,7 @@ function mimeToExtension(mimeType) {
   return 'jpg';
 }
 
-async function saveCaptureImage(imageDataUrl) {
+async function saveDataUrlImage(imageDataUrl, targetDir, publicBasePath) {
   const parsed = parseDataUrl(imageDataUrl);
   if (!parsed) {
     const error = new Error('Şəkil data-url formatında olmalıdır.');
@@ -449,15 +501,23 @@ async function saveCaptureImage(imageDataUrl) {
 
   const ext = mimeToExtension(parsed.mimeType);
   const fileName = `${Date.now()}-${randomUUID()}.${ext}`;
-  const absPath = path.join(uploadsDir, fileName);
+  const absPath = path.join(targetDir, fileName);
 
-  await mkdir(uploadsDir, { recursive: true });
+  await mkdir(targetDir, { recursive: true });
   await writeFile(absPath, parsed.buffer);
 
   return {
     absPath,
-    publicPath: `/uploads/vehicle-captures/${fileName}`,
+    publicPath: `${publicBasePath}/${fileName}`,
   };
+}
+
+async function saveCaptureImage(imageDataUrl) {
+  return saveDataUrlImage(imageDataUrl, uploadsDir, '/uploads/vehicle-captures');
+}
+
+async function saveGlossGarageImage(imageDataUrl) {
+  return saveDataUrlImage(imageDataUrl, glossGarageUploadsDir, '/uploads/glossgarage');
 }
 
 function runVisionScript(imagePath) {
@@ -608,6 +668,84 @@ function normalizeWaterReading(input) {
     usageAmount,
     total: Number((usageAmount * pricePerUnit).toFixed(2)),
     createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeGlossService(input) {
+  const title = String(input.title || '').trim();
+  if (!title) {
+    const error = new Error('Xidmət adı mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const sedanPrice = toNumber(input.sedanPrice ?? input.sedan_price);
+  const suvPrice = toNumber(input.suvPrice ?? input.suv_price);
+
+  return {
+    slug: String(input.slug || '').trim() || slugify(title),
+    title,
+    category: String(input.category || 'Xidmət').trim() || 'Xidmət',
+    sedanPrice,
+    suvPrice,
+    notes: String(input.notes || '').trim(),
+    active: input.active === false || input.active === 'false' ? false : true,
+    sortOrder: Number(input.sortOrder ?? input.sort_order) || 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function normalizeGlossJobItem(item, vehicleType) {
+  const serviceTitle = String(item.serviceTitle || item.title || '').trim();
+  const sedanPrice = toNumber(item.sedanPrice ?? item.sedan_price);
+  const suvPrice = toNumber(item.suvPrice ?? item.suv_price);
+  const quantity = Math.max(1, Number(item.quantity) || 1);
+  const unitPrice = toNumber(item.unitPrice ?? item.unit_price) || (vehicleType === 'suv' ? suvPrice : sedanPrice);
+  const lineTotal = Number((unitPrice * quantity).toFixed(2));
+
+  return {
+    serviceId: item.serviceId ?? item.service_id ?? null,
+    serviceSlug: String(item.serviceSlug || item.service_slug || '').trim(),
+    serviceTitle: serviceTitle || 'Xidmət',
+    category: String(item.category || '').trim(),
+    sedanPrice,
+    suvPrice,
+    quantity,
+    unitPrice,
+    lineTotal,
+    note: String(item.note || '').trim(),
+  };
+}
+
+function normalizeGlossJob(input) {
+  const customerName = String(input.customerName || input.customer_name || '').trim();
+  const plate = String(input.plate || '').trim().toUpperCase();
+  const vehicleType = input.vehicleType === 'suv' ? 'suv' : 'sedan';
+  const serviceDate = String(input.serviceDate || input.service_date || '').trim();
+  const note = String(input.note || '').trim();
+  const itemsInput = Array.isArray(input.items) ? input.items : [];
+  const imagesInput = Array.isArray(input.images) ? input.images : [];
+
+  if (!plate || !serviceDate || itemsInput.length === 0) {
+    const error = new Error('Nömrə, tarix və ən az bir xidmət mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const items = itemsInput.map((item) => normalizeGlossJobItem(item, vehicleType));
+  const total = Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
+
+  return {
+    customerName,
+    plate,
+    vehicleType,
+    serviceDate,
+    note,
+    items,
+    images: imagesInput,
+    total,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -970,6 +1108,240 @@ async function deleteWaterReading(url) {
   await query('DELETE FROM wash_water_readings WHERE il = $1 AND ay = $2', [il, ay]);
 }
 
+function serviceToResponse(row) {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    category: row.category,
+    sedanPrice: toNumber(row.sedan_price),
+    suvPrice: toNumber(row.suv_price),
+    notes: row.notes,
+    active: Boolean(row.active),
+    sortOrder: Number(row.sort_order) || 0,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+  };
+}
+
+function jobToResponse(row) {
+  const items = Array.isArray(row.items) ? row.items : [];
+  const images = Array.isArray(row.images) ? row.images : [];
+
+  return {
+    id: row.id,
+    customerName: row.customer_name,
+    plate: row.plate,
+    vehicleType: row.vehicle_type,
+    serviceDate: row.service_date,
+    items: items.map((item) => ({
+      serviceId: item.serviceId ?? item.service_id ?? null,
+      serviceSlug: String(item.serviceSlug || item.service_slug || ''),
+      serviceTitle: String(item.serviceTitle || item.service_title || ''),
+      category: String(item.category || ''),
+      sedanPrice: toNumber(item.sedanPrice ?? item.sedan_price),
+      suvPrice: toNumber(item.suvPrice ?? item.suv_price),
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      unitPrice: toNumber(item.unitPrice ?? item.unit_price),
+      lineTotal: toNumber(item.lineTotal ?? item.line_total),
+      note: String(item.note || '').trim(),
+    })),
+    images: images.map((image) => ({
+      url: String(image.url || image.imageUrl || ''),
+      caption: String(image.caption || '').trim(),
+    })),
+    total: toNumber(row.total),
+    note: row.note,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : row.createdAt,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : row.updatedAt,
+  };
+}
+
+async function saveGlossJobImages(images = []) {
+  const result = [];
+
+  for (const image of images) {
+    const dataUrl = String(image?.dataUrl || image?.imageDataUrl || '').trim();
+    if (!dataUrl) continue;
+
+    const saved = await saveGlossGarageImage(dataUrl);
+    result.push({
+      url: saved.publicPath,
+      caption: String(image?.caption || '').trim(),
+    });
+  }
+
+  return result;
+}
+
+async function listGlossServices() {
+  const result = await query('SELECT * FROM glossgarage_services ORDER BY sort_order ASC, id ASC');
+  return result.rows.map(serviceToResponse);
+}
+
+async function createGlossService(input) {
+  const service = normalizeGlossService(input);
+  const result = await query(
+    `
+      INSERT INTO glossgarage_services (
+        slug, title, category, sedan_price, suv_price, notes, active, sort_order, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `,
+    [
+      service.slug,
+      service.title,
+      service.category,
+      service.sedanPrice,
+      service.suvPrice,
+      service.notes,
+      service.active,
+      service.sortOrder,
+      service.updatedAt,
+      service.updatedAt,
+    ],
+  );
+
+  return serviceToResponse(result.rows[0]);
+}
+
+async function updateGlossService(url, input) {
+  const id = Number(url.searchParams.get('id'));
+  const service = normalizeGlossService(input);
+  const result = await query(
+    `
+      UPDATE glossgarage_services
+      SET slug = $1,
+          title = $2,
+          category = $3,
+          sedan_price = $4,
+          suv_price = $5,
+          notes = $6,
+          active = $7,
+          sort_order = $8,
+          updated_at = $9
+      WHERE id = $10
+      RETURNING *
+    `,
+    [
+      service.slug,
+      service.title,
+      service.category,
+      service.sedanPrice,
+      service.suvPrice,
+      service.notes,
+      service.active,
+      service.sortOrder,
+      service.updatedAt,
+      id,
+    ],
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error('Xidmət tapılmadı.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return serviceToResponse(result.rows[0]);
+}
+
+async function deleteGlossService(url) {
+  const id = Number(url.searchParams.get('id'));
+  if (!id) {
+    const error = new Error('Xidmət silmək üçün id mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await query('DELETE FROM glossgarage_services WHERE id = $1', [id]);
+}
+
+async function listGlossJobs() {
+  const result = await query('SELECT * FROM glossgarage_jobs ORDER BY service_date DESC, created_at DESC, id DESC LIMIT 200');
+  return result.rows.map(jobToResponse);
+}
+
+async function createGlossJob(input) {
+  const job = normalizeGlossJob(input);
+  const images = await saveGlossJobImages(job.images);
+  const result = await query(
+    `
+      INSERT INTO glossgarage_jobs (
+        customer_name, plate, vehicle_type, service_date, items, images, total, note, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)
+      RETURNING *
+    `,
+    [
+      job.customerName,
+      job.plate,
+      job.vehicleType,
+      job.serviceDate,
+      JSON.stringify(job.items),
+      JSON.stringify(images),
+      job.total,
+      job.note,
+      job.createdAt,
+      job.updatedAt,
+    ],
+  );
+
+  return jobToResponse(result.rows[0]);
+}
+
+async function updateGlossJob(url, input) {
+  const id = Number(url.searchParams.get('id'));
+  const job = normalizeGlossJob(input);
+  const images = await saveGlossJobImages(job.images);
+  const result = await query(
+    `
+      UPDATE glossgarage_jobs
+      SET customer_name = $1,
+          plate = $2,
+          vehicle_type = $3,
+          service_date = $4,
+          items = $5::jsonb,
+          images = $6::jsonb,
+          total = $7,
+          note = $8,
+          updated_at = $9
+      WHERE id = $10
+      RETURNING *
+    `,
+    [
+      job.customerName,
+      job.plate,
+      job.vehicleType,
+      job.serviceDate,
+      JSON.stringify(job.items),
+      JSON.stringify(images),
+      job.total,
+      job.note,
+      job.updatedAt,
+      id,
+    ],
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error('İş tapılmadı.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return jobToResponse(result.rows[0]);
+}
+
+async function deleteGlossJob(url) {
+  const id = Number(url.searchParams.get('id'));
+  if (!id) {
+    const error = new Error('İş silmək üçün id mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await query('DELETE FROM glossgarage_jobs WHERE id = $1', [id]);
+}
+
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -1125,6 +1497,48 @@ async function handleRequest(req, res) {
 
   if (url.pathname === '/api/wash-water-readings' && req.method === 'DELETE') {
     await deleteWaterReading(url);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/services' && req.method === 'GET') {
+    sendJson(res, 200, await listGlossServices());
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/services' && req.method === 'POST') {
+    sendJson(res, 201, await createGlossService(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/services' && req.method === 'PUT') {
+    sendJson(res, 200, await updateGlossService(url, await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/services' && req.method === 'DELETE') {
+    await deleteGlossService(url);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/jobs' && req.method === 'GET') {
+    sendJson(res, 200, await listGlossJobs());
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/jobs' && req.method === 'POST') {
+    sendJson(res, 201, await createGlossJob(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/jobs' && req.method === 'PUT') {
+    sendJson(res, 200, await updateGlossJob(url, await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/gloss/jobs' && req.method === 'DELETE') {
+    await deleteGlossJob(url);
     sendJson(res, 200, { ok: true });
     return;
   }

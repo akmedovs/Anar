@@ -45,3 +45,31 @@ CREATE TABLE IF NOT EXISTS wash_water_readings (
   total NUMERIC(12, 2) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS glossgarage_services (
+  id SERIAL PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Xidmət',
+  sedan_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  suv_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS glossgarage_jobs (
+  id SERIAL PRIMARY KEY,
+  customer_name TEXT NOT NULL DEFAULT '',
+  plate TEXT NOT NULL,
+  vehicle_type TEXT NOT NULL CHECK (vehicle_type IN ('sedan', 'suv')),
+  service_date DATE NOT NULL,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  images JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
