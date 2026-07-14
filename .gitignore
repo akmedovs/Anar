@@ -14,6 +14,8 @@ dist-ssr
 .env
 server/db.json
 .postgres-data
+server/__pycache__/
+*.pyc
 
 # Editor directories and files
 .vscode/*
