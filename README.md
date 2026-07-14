@@ -2,132 +2,124 @@
 
 Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + PostgreSQL layihəsi.
 
-## Qısa fikir
+## Layihə quruluşu
 
-Bu repo Docker ilə qalxır.
+- Frontend: Vite, `http://localhost:5173`
+- Backend: Node.js, `http://localhost:3001`
+- Database: PostgreSQL
 
-- `web` konteyneri frontend-i göstərir
-- `api` konteyneri backend-i işlədır
-- `db` konteyneri PostgreSQL saxlayır
+`vite.config.js` API sorğularını `127.0.0.1:3001`-ə proxy edir.
 
-Lokal və server üçün əsas komanda:
+## Lokal istifadə
 
-```bash
-docker compose up -d --build
-```
+Bu layihəni lokalda 2 formada işlədə bilərsən.
 
-## Lazım olanlar
+### Variant 1: tək komanda
 
-- Docker
-- Docker Compose plugin
-- Git
-
-## Lokal qurulum
-
-1. Repo-ni çək.
+Bu komanda backend və frontend-i birlikdə qaldırır:
 
 ```bash
-git clone https://github.com/akmedovs/Anar.git
-cd Anar
+npm run dev
 ```
 
-2. Konteynerləri qaldır.
+Sonra bunlar açıq olur:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3001`
+
+### Variant 2: ayrı-ayrı işlətmək
+
+1. Asılılıqları qur.
 
 ```bash
-docker compose up -d --build
+npm install
 ```
 
-3. Brauzerdən aç.
+2. `.env` faylını hazırla.
+
+```bash
+cp .env.example .env
+```
+
+3. Bir terminalda backend-i aç.
+
+```bash
+npm run server
+```
+
+4. Başqa terminalda frontend-i aç.
+
+```bash
+npm run client
+```
+
+## Yoxlama
+
+Backend health:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
+Frontend:
 
 ```text
-http://localhost:8080
+http://localhost:5173
 ```
 
-4. API health check:
+## Build
+
+Production build:
+
+```bash
+npm run build
+```
+
+## Docker ilə işlətmək
+
+Bu repo üçün Docker production axını da var.
+
+```bash
+docker compose up -d --build
+```
+
+Docker-da:
+
+- public web giriş: `http://localhost:8080`
+- API: konteyner içində `3001`
+- PostgreSQL: `db` servisində
+
+Yoxlama:
 
 ```bash
 curl http://localhost:8080/api/health
 ```
 
-## Build axını
+## Ubuntu serverdə qaldırmaq
 
-Bu layihədə ayrıca `npm run dev` və `pm2` istifadə olunmur. Hər şey Docker ilə qalxır.
-
-Görülən işlər:
+Əgər serverdə Docker istifadə edəcəksənsə, `INSTALLATION.md`-ə bax:
 
 ```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f
+cat INSTALLATION.md
 ```
 
-Dayandırmaq üçün:
+Qısa fikir:
 
 ```bash
-docker compose down
-```
-
-## Ubuntu serverdə sıfırdan qurulum
-
-1. Server paketlərini qur.
-
-```bash
-sudo apt update
-sudo apt install -y ca-certificates curl gnupg git
-```
-
-2. Docker qur.
-
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-```
-
-3. Docker Compose plugin yoxla.
-
-```bash
-docker compose version
-```
-
-4. Layihəni serverə çək.
-
-```bash
-cd /var/www
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
-```
-
-5. Konteynerləri build et və qaldır.
-
-```bash
 docker compose up -d --build
 ```
-
-6. Health check et.
-
-```bash
-curl http://127.0.0.1:8080/api/health
-```
-
-## Domen yönləndirmə
-
-Əgər domeni serverə bağlayacaqsansa:
-
-- `glossgarage.az` DNS olaraq server IP-sinə gedir
-- sonra Nginx və ya başqa reverse proxy `glossgarage.az` sorğusunu `127.0.0.1:8080`-ə yönləndirir
-
-Bu repo-nun içindəki web konteyner artıq `api`-yə proxy edir.
 
 ## Backup
 
-PostgreSQL data Docker volume-də qalır.
-
-Məsələn backup üçün:
+PostgreSQL backup:
 
 ```bash
 docker compose exec db pg_dump -U anar_user anar > anar.dump
 ```
 
-Restore üçün:
+Restore:
 
 ```bash
 cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
@@ -135,6 +127,7 @@ cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
 
 ## Qeyd
 
-- `npm run dev` inkişaf rejimi üçün lazım deyil.
+- `npm run dev` development üçün ən rahat yoldur.
+- `npm run client` frontend-i, `npm run server` backend-i ayrıca açır.
 - `pm2` istifadə olunmur.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
