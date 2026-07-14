@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 const processes = [
   spawn('node', ['server/server.js'], { stdio: 'inherit' }),
-  spawn('node', ['node_modules/vite/bin/vite.js'], { stdio: 'inherit' }),
+  spawn('node', ['node_modules/vite/bin/vite.js', '--host', '0.0.0.0'], { stdio: 'inherit' }),
 ];
 
 function shutdown(signal) {

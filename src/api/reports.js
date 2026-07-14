@@ -47,6 +47,13 @@ export const reportsApi = {
       body: JSON.stringify(report),
     });
   },
+  update({ id, ...report }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/reports?${params.toString()}`, {
+      method: 'PUT',
+      body: JSON.stringify(report),
+    });
+  },
   remove({ id, il, ay, ev }) {
     const params = id ? new URLSearchParams({ id }) : new URLSearchParams({ il, ay, ev });
     return request(`/api/reports?${params.toString()}`, {
@@ -63,6 +70,28 @@ export const vehicleEventsApi = {
     return request('/api/vehicle-events', {
       method: 'POST',
       body: JSON.stringify(event),
+    });
+  },
+  update({ id, ...event }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/vehicle-events?${params.toString()}`, {
+      method: 'PUT',
+      body: JSON.stringify(event),
+    });
+  },
+  remove({ id }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/vehicle-events?${params.toString()}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+export const vehicleVisionApi = {
+  recognize(payload) {
+    return request('/api/vehicle-events/recognize', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 };
@@ -83,6 +112,19 @@ export const washExpensesApi = {
       body: JSON.stringify(expense),
     });
   },
+  update({ id, ...expense }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/wash-expenses?${params.toString()}`, {
+      method: 'PUT',
+      body: JSON.stringify(expense),
+    });
+  },
+  remove({ id }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/wash-expenses?${params.toString()}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 export const washWaterApi = {
@@ -99,6 +141,19 @@ export const washWaterApi = {
     return request('/api/wash-water-readings', {
       method: 'POST',
       body: JSON.stringify(reading),
+    });
+  },
+  update({ id, ...reading }) {
+    const params = new URLSearchParams({ id });
+    return request(`/api/wash-water-readings?${params.toString()}`, {
+      method: 'PUT',
+      body: JSON.stringify(reading),
+    });
+  },
+  remove({ id, il, ay }) {
+    const params = id ? new URLSearchParams({ id }) : new URLSearchParams({ il, ay });
+    return request(`/api/wash-water-readings?${params.toString()}`, {
+      method: 'DELETE',
     });
   },
 };

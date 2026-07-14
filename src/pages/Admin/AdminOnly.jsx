@@ -6,6 +6,7 @@ import { theme } from '../../constants/theme';
 function AdminOnly() {
   const [dbData, setDbData] = useState([]);
   const [selectedReportKey, setSelectedReportKey] = useState('');
+  const [settings] = useState(loadSettings);
   const [formData, setFormData] = useState({
     il: cariIl,
     ay: aylar[new Date().getMonth()],
@@ -33,6 +34,7 @@ function AdminOnly() {
 
     setFormData((prev) => ({
       ...prev,
+      kiraye: current ? String(current.kiraye ?? '') : prev.kiraye,
       kohneIsiq: current
         ? String(current.kohneIsiq ?? '')
         : isJanuary
@@ -41,7 +43,7 @@ function AdminOnly() {
             ? String(previous.yeniIsiq ?? '')
             : '',
       yeniIsiq: current ? String(current.yeniIsiq ?? '') : '',
-      kiraye: current ? String(current.kiraye ?? '') : prev.kiraye,
+      suNefer: current ? String(current.suNefer ?? '') : prev.suNefer,
       wifi: current ? String(current.wifi ?? '') : prev.wifi,
     }));
   }, [dbData, formData.il, formData.ay, formData.ev]);
@@ -62,7 +64,13 @@ function AdminOnly() {
     });
   }, [selectedReportKey, dbData]);
 
-  const currentReports = useMemo(() => dbData.slice().sort((a, b) => Number(b.il) - Number(a.il) || aylar.indexOf(a.ay) - aylar.indexOf(b.ay)), [dbData]);
+  const currentReports = useMemo(
+    () =>
+      dbData
+        .slice()
+        .sort((a, b) => Number(b.il) - Number(a.il) || aylar.indexOf(a.ay) - aylar.indexOf(b.ay) || String(a.ev).localeCompare(String(b.ev))),
+    [dbData],
+  );
   const selectedReport = selectedReportKey ? dbData.find((item) => keyOf(item) === selectedReportKey) : null;
   const selectedMonthIndex = aylar.indexOf(formData.ay);
   const isJanuary = selectedMonthIndex === 0;
@@ -80,12 +88,13 @@ function AdminOnly() {
     const yeniIsiqNum = Number(formData.yeniIsiq) || 0;
     const suNeferNum = Number(formData.suNefer) || 0;
     const wifiNum = Number(formData.wifi) || 0;
-    const tarif = 0.15;
-    const suQiymet = 3;
-    const serfiyyat = Math.max(0, yeniIsiqNum - kohneIsiqNum);
-    const isiqPulu = serfiyyat * tarif;
-    const suCem = suNeferNum * suQiymet;
-    const total = kirayeNum - isiqPulu - suCem - wifiNum;
+    const tarif = Number(settings.isiqTarif) || 0.15;
+    const suQiymet = Number(settings.suQiymet) || 3;
+    const serfiyyat = yeniIsiqNum - kohneIsiqNum;
+    const isiqPulu = Number((Math.max(0, serfiyyat) * tarif).toFixed(2));
+    const suCem = Number((suNeferNum * suQiymet).toFixed(2));
+    const total = Number((kirayeNum - isiqPulu - suCem - wifiNum).toFixed(2));
+    const existing = selectedReportKey ? dbData.find((item) => keyOf(item) === selectedReportKey) : null;
 
     await reportsApi.create({
       il,
@@ -101,18 +110,22 @@ function AdminOnly() {
       total,
     });
 
+    if (existing?.id) {
+      await reportsApi.remove({ id: existing.id });
+    }
+
     setSelectedReportKey('');
     await fetchReports(il);
   };
 
   return (
     <div style={wrap}>
-      <h1 style={title}>Kirayə qeydləri</h1>
-      <p style={sub}>Mövcud qeydi seç, məlumatları yeni qeyd kimi saxla</p>
+      <h1 style={title}>Kirayə düzəlişləri</h1>
+      <p style={sub}>Mövcud qeydi seç, dəyiş və yenidən yadda saxla</p>
 
       <section style={panel}>
         <h2 style={panelTitle}>Mövcud qeydlər</h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+        <div style={chips}>
           {currentReports.slice(0, 12).map((item) => (
             <button key={keyOf(item)} type="button" onClick={() => setSelectedReportKey(keyOf(item))} style={pill(selectedReportKey === keyOf(item))}>
               {item.il} / {item.ay} / {item.ev}
@@ -122,18 +135,46 @@ function AdminOnly() {
 
         <form onSubmit={save} style={{ display: 'grid', gap: '12px' }}>
           <Row>
-            <Field label="İl"><input type="number" name="il" value={formData.il} onChange={handleChange} style={control} /></Field>
-            <Field label="Ay"><select name="ay" value={formData.ay} onChange={handleChange} style={control}>{aylar.map((ay) => <option key={ay} value={ay}>{ay}</option>)}</select></Field>
-            <Field label="Ev"><select name="ev" value={formData.ev} onChange={handleChange} style={control}>{['K-1', 'K-2', 'K-3', 'K-4', 'K-5', 'K-PDVL'].map((ev) => <option key={ev} value={ev}>{ev}</option>)}</select></Field>
+            <Field label="İl">
+              <input type="number" name="il" value={formData.il} onChange={handleChange} style={control} />
+            </Field>
+            <Field label="Ay">
+              <select name="ay" value={formData.ay} onChange={handleChange} style={control}>
+                {aylar.map((ay) => (
+                  <option key={ay} value={ay}>
+                    {ay}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Ev">
+              <select name="ev" value={formData.ev} onChange={handleChange} style={control}>
+                {['K-1', 'K-2', 'K-3', 'K-4', 'K-5', 'K-PDVL'].map((ev) => (
+                  <option key={ev} value={ev}>
+                    {ev}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </Row>
           <Row>
-            <Field label="Kiraye"><input type="number" name="kiraye" value={formData.kiraye} onChange={handleChange} style={control} /></Field>
-            <Field label="Köhnə"><input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleChange} readOnly={!canEditOldMeter} style={canEditOldMeter ? control : readOnlyControl} /></Field>
-            <Field label="Yeni"><input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleChange} readOnly={!canEditNewMeter} style={canEditNewMeter ? control : readOnlyControl} /></Field>
+            <Field label="Kiraye">
+              <input type="number" name="kiraye" value={formData.kiraye} onChange={handleChange} style={control} />
+            </Field>
+            <Field label="Köhnə">
+              <input type="number" name="kohneIsiq" value={formData.kohneIsiq} onChange={handleChange} readOnly={!canEditOldMeter} style={canEditOldMeter ? control : readOnlyControl} />
+            </Field>
+            <Field label="Yeni">
+              <input type="number" name="yeniIsiq" value={formData.yeniIsiq} onChange={handleChange} readOnly={!canEditNewMeter} style={canEditNewMeter ? control : readOnlyControl} />
+            </Field>
           </Row>
           <Row>
-            <Field label="Su nəfər"><input type="number" name="suNefer" value={formData.suNefer} onChange={handleChange} style={control} /></Field>
-            <Field label="Internet xərci"><input type="number" name="wifi" value={formData.wifi} onChange={handleChange} style={control} /></Field>
+            <Field label="Su nəfər">
+              <input type="number" name="suNefer" value={formData.suNefer} onChange={handleChange} style={control} />
+            </Field>
+            <Field label="Internet">
+              <input type="number" name="wifi" value={formData.wifi} onChange={handleChange} style={control} />
+            </Field>
             <div />
           </Row>
           <button type="submit" style={button}>Yadda Saxla</button>
@@ -146,7 +187,11 @@ function AdminOnly() {
           <table style={table}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['İl', 'Ay', 'Ev', 'Kiraye', 'İşıq xərci', 'Su xərci', 'Internet xərci', 'Net'].map((x) => <th key={x} style={th}>{x}</th>)}
+                {['İl', 'Ay', 'Ev', 'Kiraye', 'İşıq', 'Su', 'Internet', 'Net'].map((x) => (
+                  <th key={x} style={th}>
+                    {x}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -183,17 +228,36 @@ const control = { width: '100%', padding: '10px', borderRadius: '7px', border: `
 const readOnlyControl = { ...control, background: theme.colors.surfaceSoft, color: theme.colors.muted, cursor: 'not-allowed' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const Row = ({ children }) => <div style={rowStyle}>{children}</div>;
-const Field = ({ label, children }) => <div><label style={{ display: 'block', marginBottom: '5px', color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{label}</label>{children}</div>;
-const keyOf = (item) => `${item.id}-${item.il}-${item.ay}-${item.ev}`;
-const pill = (active) => ({ border: `1px solid ${theme.colors.border}`, background: active ? theme.colors.text : theme.colors.surface, color: active ? '#fff' : '#334155', borderRadius: theme.radius.pill, padding: '8px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 700 });
+const Field = ({ label, children }) => (
+  <div>
+    <label style={{ display: 'block', marginBottom: '5px', color: theme.colors.muted, fontSize: '12px', fontWeight: 700 }}>{label}</label>
+    {children}
+  </div>
+);
+const keyOf = (item) => `${item.il}-${item.ay}-${item.ev}`;
+const chips = { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' };
+const pill = (active) => ({
+  border: `1px solid ${theme.colors.border}`,
+  background: active ? theme.colors.text : theme.colors.surface,
+  color: active ? '#fff' : '#334155',
+  borderRadius: theme.radius.pill,
+  padding: '8px 12px',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 700,
+});
 
 function findLatestReport(data, il, ay, ev) {
-  return data
-    .filter((item) =>
-      Number(item.il) === Number(il) &&
-      String(item.ev).trim() === String(ev).trim() &&
-      String(item.ay).trim().toLowerCase() === String(ay).trim().toLowerCase())
-    .sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+  return (
+    data
+      .filter(
+        (item) =>
+          Number(item.il) === Number(il) &&
+          String(item.ev).trim() === String(ev).trim() &&
+          String(item.ay).trim().toLowerCase() === String(ay).trim().toLowerCase(),
+      )
+      .sort((a, b) => Number(b.id) - Number(a.id))[0] || null
+  );
 }
 
 function findPreviousReport(data, il, ay, ev) {
@@ -203,6 +267,22 @@ function findPreviousReport(data, il, ay, ev) {
   const previousAy = currentIndex === 0 ? aylar[11] : aylar[currentIndex - 1];
   const previousIl = currentIndex === 0 ? Number(il) - 1 : Number(il);
   return findLatestReport(data, previousIl, previousAy, ev);
+}
+
+function loadSettings() {
+  if (typeof window === 'undefined') {
+    return {
+      isiqTarif: '0.15',
+      suQiymet: '3',
+    };
+  }
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('qlobal_ayarlar'));
+    return saved || { isiqTarif: '0.15', suQiymet: '3' };
+  } catch {
+    return { isiqTarif: '0.15', suQiymet: '3' };
+  }
 }
 
 export default AdminOnly;

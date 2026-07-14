@@ -3,6 +3,7 @@ export const theme = {
     appBg: '#f4f7fb',
     surface: '#ffffff',
     surfaceSoft: '#f8fafc',
+    surfaceMuted: '#eef4fb',
     border: '#dbe4f0',
     text: '#0f172a',
     muted: '#64748b',
@@ -13,6 +14,10 @@ export const theme = {
     success: '#16a34a',
     amber: '#d97706',
     info: '#0284c7',
+    softPrimary: '#e8eefc',
+    softTeal: '#def7f3',
+    softWash: '#fee4e2',
+    softAmber: '#fef3c7',
   },
   radius: {
     sm: '8px',
