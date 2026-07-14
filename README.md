@@ -6,7 +6,7 @@ Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi
 
 - Frontend: React + Vite
 - Backend: Node.js HTTP server
-- Storage: local JSON faylı (`server/db.json`)
+- Storage: PostgreSQL
 - Opsional: vehicle recognition üçün Python skripti
 
 ## Lazım olanlar
@@ -14,6 +14,7 @@ Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js layihəsi
 - Node.js 20 və ya daha yeni
 - npm
 - Git
+- PostgreSQL 14 və ya daha yeni
 - Opsional recognition üçün:
   - Python 3
   - `pip`
@@ -45,12 +46,12 @@ curl http://localhost:3001/api/health
 Gözlənən cavab:
 
 ```json
-{"ok":true,"database":"json"}
+{"ok":true,"database":"postgresql"}
 ```
 
 ## Production
 
-Bu repo hazırkı vəziyyətdə birbaşa Node server + static build modeli ilə işləyir.
+Bu repo PostgreSQL backend + static build modeli ilə işləyir.
 
 ```bash
 npm install
@@ -68,6 +69,7 @@ Production-da ən sadə model:
 - `server/server.js` prosesi PM2 ilə işləsin
 - `dist/` qovluğunu Nginx servis etsin
 - `/api/*` sorğuları `127.0.0.1:3001`-ə proxy olunsun
+- Data backup üçün `pg_dump` istifadə olunsun
 
 Ubuntu üçün tam ardıcıllıq `INSTALLATION.md` faylında verilib.
 
@@ -81,6 +83,7 @@ cp .env.example .env
 
 Əsas dəyişənlər:
 
+- `DATABASE_URL` - PostgreSQL connection string
 - `PORT` - backend portu, default `3001`
 - `VEHICLE_VISION_COMMAND` - python icraçı yolu, default `python3`
 - `VEHICLE_YOLO_MODEL` - vehicle detector model yolu
@@ -89,6 +92,6 @@ cp .env.example .env
 
 ## Qeydlər
 
-- Backend hazırda PostgreSQL yox, local JSON storage istifadə edir.
-- `server/db.json` Git-ə əlavə olunmamalıdır.
+- Backend artıq PostgreSQL istifadə edir.
+- `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.
 - Recognition feature istifadə etmirsinizsə, Python/OCR paketləri tələb olunmur.

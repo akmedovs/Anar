@@ -1,16 +1,50 @@
 import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import pg from 'pg';
+
+const { Pool } = pg;
+const envFile = path.resolve(process.cwd(), '.env');
+
+function loadEnvFile(filePath) {
+  if (!existsSync(filePath)) return;
+
+  const raw = readFileSync(filePath, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const equalsIndex = trimmed.indexOf('=');
+    if (equalsIndex === -1) continue;
+
+    const key = trimmed.slice(0, equalsIndex).trim();
+    let value = trimmed.slice(equalsIndex + 1).trim();
+
+    if (!key || process.env[key] !== undefined) continue;
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+loadEnvFile(envFile);
 
 const port = Number(process.env.PORT) || 3001;
-const dataFile = path.resolve(process.cwd(), 'server/db.json');
+const schemaFile = path.resolve(process.cwd(), 'server/schema.sql');
+const legacyDataFile = path.resolve(process.cwd(), 'server/db.json');
 const uploadsDir = path.resolve(process.cwd(), 'server/uploads/vehicle-captures');
 const visionScript = path.resolve(process.cwd(), 'server/vehicle-vision.py');
 const visionCommand = process.env.VEHICLE_VISION_COMMAND || 'python3';
 const visionModel = process.env.VEHICLE_YOLO_MODEL || '';
 const visionOcrConfig = process.env.VEHICLE_OCR_CONFIG || '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-';
+const databaseUrl = String(process.env.DATABASE_URL || '').trim();
+const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
 const monthOrder = [
   'Yanvar',
@@ -26,22 +60,6 @@ const monthOrder = [
   'Noyabr',
   'Dekabr',
 ];
-
-const defaultState = {
-  sequences: {
-    reports: 1,
-    vehicleEvents: 1,
-    washExpenses: 1,
-    washWaterReadings: 1,
-  },
-  reports: [],
-  vehicleEvents: [],
-  washExpenses: [],
-  washWaterReadings: [],
-};
-
-let state = structuredClone(defaultState);
-let saveQueue = Promise.resolve();
 
 function parsePositiveId(value) {
   const id = Number(value);
@@ -151,40 +169,142 @@ function normalizeLoadedState(parsed) {
   };
 }
 
-async function loadState() {
-  try {
-    const raw = await readFile(dataFile, 'utf8');
-    return normalizeLoadedState(JSON.parse(raw));
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      console.warn(`Lokal data fayli oxunmadı, yeni fayl yaradılır: ${error.message}`);
-    }
+async function initializeDatabase() {
+  if (!pool) {
+    throw new Error('DATABASE_URL is not set. PostgreSQL connection is required.');
+  }
 
-    return structuredClone(defaultState);
+  const schema = await readFile(schemaFile, 'utf8');
+  const statements = schema
+    .split(/;\s*(?:\r?\n|$)/)
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  for (const statement of statements) {
+    await pool.query(statement);
+  }
+
+  const { rows: counts } = await pool.query(`
+    SELECT
+      (SELECT COUNT(*)::int FROM reports) AS reports_count,
+      (SELECT COUNT(*)::int FROM vehicle_events) AS vehicle_events_count,
+      (SELECT COUNT(*)::int FROM wash_expenses) AS wash_expenses_count,
+      (SELECT COUNT(*)::int FROM wash_water_readings) AS wash_water_readings_count
+  `);
+
+  const hasData = Object.values(counts[0] || {}).some((value) => Number(value) > 0);
+  if (!hasData) {
+    try {
+      const raw = await readFile(legacyDataFile, 'utf8');
+      await migrateLegacyJson(JSON.parse(raw));
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        console.warn(`Legacy JSON migration skipped: ${error.message}`);
+      }
+    }
   }
 }
 
-async function saveState() {
-  const payload = JSON.stringify(state, null, 2);
-  const tempFile = `${dataFile}.tmp`;
+async function migrateLegacyJson(parsed) {
+  const legacy = normalizeLoadedState(parsed || {});
+  const client = await pool.connect();
 
-  await mkdir(path.dirname(dataFile), { recursive: true });
-  await writeFile(tempFile, payload, 'utf8');
-  await rename(tempFile, dataFile);
+  try {
+    await client.query('BEGIN');
+
+    for (const row of legacy.reports) {
+      await client.query(
+        `
+          INSERT INTO reports (
+            id, il, ay, ev, kiraye, kohne_isiq, yeni_isiq, serfiyyat, isiq_pulu, su_nefer, su_cem, wifi, total, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        `,
+        [
+          row.id,
+          row.il,
+          row.ay,
+          row.ev,
+          row.kiraye,
+          row.kohne_isiq,
+          row.yeni_isiq,
+          row.serfiyyat,
+          row.isiq_pulu,
+          row.su_nefer,
+          row.su_cem,
+          row.wifi,
+          row.total,
+          row.updatedAt,
+        ],
+      );
+    }
+
+    for (const row of legacy.vehicleEvents) {
+      await client.query(
+        `
+          INSERT INTO vehicle_events (
+            id, plate, direction, source, confidence, image_url, created_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `,
+        [row.id, row.plate, row.direction, row.source, row.confidence, row.imageUrl, row.createdAt],
+      );
+    }
+
+    for (const row of legacy.washExpenses) {
+      await client.query(
+        `
+          INSERT INTO wash_expenses (
+            id, expense_date, title, amount, note, created_at
+          ) VALUES ($1,$2,$3,$4,$5,$6)
+        `,
+        [row.id, row.expenseDate, row.title, row.amount, row.note, row.createdAt],
+      );
+    }
+
+    for (const row of legacy.washWaterReadings) {
+      await client.query(
+        `
+          INSERT INTO wash_water_readings (
+            id, il, ay, old_reading, new_reading, price_per_unit, usage_amount, total, created_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `,
+        [
+          row.id,
+          row.il,
+          row.ay,
+          row.oldReading,
+          row.newReading,
+          row.pricePerUnit,
+          row.usageAmount,
+          row.total,
+          row.createdAt,
+        ],
+      );
+    }
+
+    await client.query(`SELECT setval(pg_get_serial_sequence('reports', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM reports), 0), 1), true)`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('vehicle_events', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM vehicle_events), 0), 1), true)`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('wash_expenses', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM wash_expenses), 0), 1), true)`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('wash_water_readings', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM wash_water_readings), 0), 1), true)`);
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-function persist() {
-  saveQueue = saveQueue.then(() => saveState()).catch((error) => {
-    console.error('Lokal data saxlanmadı:', error.message);
-  });
+function getPool() {
+  if (!pool) {
+    throw new Error('DATABASE_URL is not set. PostgreSQL connection is required.');
+  }
 
-  return saveQueue;
+  return pool;
 }
 
-function nextId(key) {
-  const id = Number(state.sequences[key]) || 1;
-  state.sequences[key] = id + 1;
-  return id;
+async function query(sql, params = []) {
+  return getPool().query(sql, params);
 }
 
 function toNumber(value) {
@@ -211,7 +331,7 @@ function reportToResponse(row) {
     suCem: toNumber(row.su_cem),
     wifi: toNumber(row.wifi),
     total: toNumber(row.total),
-    updatedAt: row.updatedAt,
+    updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : row.updated_at ? new Date(row.updated_at).toISOString() : null,
   };
 }
 
@@ -225,8 +345,8 @@ function eventToResponse(row) {
     minutes: toNumber(row.minutes),
     amount: toNumber(row.amount),
     note: String(row.note || '').trim(),
-    imageUrl: row.imageUrl,
-    createdAt: row.createdAt,
+    imageUrl: row.imageUrl ?? row.image_url ?? '',
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : row.created_at ? new Date(row.created_at).toISOString() : null,
   };
 }
 
@@ -237,7 +357,7 @@ function expenseToResponse(row) {
     title: row.title,
     amount: toNumber(row.amount),
     note: row.note,
-    createdAt: row.createdAt,
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : row.created_at ? new Date(row.created_at).toISOString() : null,
   };
 }
 
@@ -251,7 +371,7 @@ function waterReadingToResponse(row) {
     pricePerUnit: toNumber(row.pricePerUnit),
     usageAmount: toNumber(row.usageAmount),
     total: toNumber(row.total),
-    createdAt: row.createdAt,
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : row.created_at ? new Date(row.created_at).toISOString() : null,
   };
 }
 
@@ -500,14 +620,6 @@ function sortReports(a, b) {
   return String(a.ev).localeCompare(String(b.ev), 'az');
 }
 
-function sortVehicleEvents(a, b) {
-  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() || b.id - a.id;
-}
-
-function sortExpenses(a, b) {
-  return String(b.expenseDate).localeCompare(String(a.expenseDate)) || b.id - a.id;
-}
-
 function sortWaterReadings(a, b) {
   if (a.il !== b.il) return b.il - a.il;
 
@@ -520,60 +632,110 @@ function sortWaterReadings(a, b) {
 async function listReports(url) {
   const ilParam = url.searchParams.get('il');
   const ayParam = url.searchParams.get('ay');
-
-  let rows = state.reports.slice();
+  const where = [];
+  const params = [];
 
   if (ilParam) {
-    const il = Number(ilParam);
-    rows = rows.filter((row) => Number(row.il) === il);
+    params.push(Number(ilParam));
+    where.push(`il = $${params.length}`);
   }
 
   if (ayParam) {
-    rows = rows.filter((row) => row.ay === ayParam);
+    params.push(ayParam);
+    where.push(`ay = $${params.length}`);
   }
 
-  return rows.sort(sortReports).map(reportToResponse);
+  const result = await query(
+    `SELECT * FROM reports${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`,
+    params,
+  );
+
+  return result.rows.sort(sortReports).map(reportToResponse);
 }
 
 async function createReport(input) {
   const report = normalizeReport(input);
-  const row = {
-    id: nextId('reports'),
-    ...report,
-  };
+  const result = await query(
+    `
+      INSERT INTO reports (
+        il, ay, ev, kiraye, kohne_isiq, yeni_isiq, serfiyyat, isiq_pulu, su_nefer, su_cem, wifi, total, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING *
+    `,
+    [
+      report.il,
+      report.ay,
+      report.ev,
+      report.kiraye,
+      report.kohne_isiq,
+      report.yeni_isiq,
+      report.serfiyyat,
+      report.isiq_pulu,
+      report.su_nefer,
+      report.su_cem,
+      report.wifi,
+      report.total,
+      report.updatedAt,
+    ],
+  );
 
-  state.reports.push(row);
-  await persist();
-  return reportToResponse(row);
+  return reportToResponse(result.rows[0]);
 }
 
 async function updateReport(url, input) {
   const id = Number(url.searchParams.get('id'));
-  const index = state.reports.findIndex((row) => row.id === id);
+  const report = normalizeReport(input);
+  const result = await query(
+    `
+      UPDATE reports
+      SET il = $1,
+          ay = $2,
+          ev = $3,
+          kiraye = $4,
+          kohne_isiq = $5,
+          yeni_isiq = $6,
+          serfiyyat = $7,
+          isiq_pulu = $8,
+          su_nefer = $9,
+          su_cem = $10,
+          wifi = $11,
+          total = $12,
+          updated_at = $13
+      WHERE id = $14
+      RETURNING *
+    `,
+    [
+      report.il,
+      report.ay,
+      report.ev,
+      report.kiraye,
+      report.kohne_isiq,
+      report.yeni_isiq,
+      report.serfiyyat,
+      report.isiq_pulu,
+      report.su_nefer,
+      report.su_cem,
+      report.wifi,
+      report.total,
+      report.updatedAt,
+      id,
+    ],
+  );
 
-  if (index === -1) {
+  if (result.rowCount === 0) {
     const error = new Error('Qeyd tapılmadı.');
     error.statusCode = 404;
     throw error;
   }
 
-  const updated = {
-    ...state.reports[index],
-    ...normalizeReport(input),
-    id,
-  };
-
-  state.reports[index] = updated;
-  await persist();
-  return reportToResponse(updated);
+  return reportToResponse(result.rows[0]);
 }
 
 async function deleteReport(url) {
   const id = Number(url.searchParams.get('id'));
 
   if (id) {
-    state.reports = state.reports.filter((row) => row.id !== id);
-    await persist();
+    await query('DELETE FROM reports WHERE id = $1', [id]);
     return;
   }
 
@@ -581,44 +743,53 @@ async function deleteReport(url) {
   const ay = String(url.searchParams.get('ay') || '').trim();
   const ev = String(url.searchParams.get('ev') || '').trim();
 
-  state.reports = state.reports.filter((row) => !(Number(row.il) === il && row.ay === ay && row.ev === ev));
-  await persist();
+  await query('DELETE FROM reports WHERE il = $1 AND ay = $2 AND ev = $3', [il, ay, ev]);
 }
 
 async function listVehicleEvents() {
-  return state.vehicleEvents.slice().sort(sortVehicleEvents).slice(0, 500).map(eventToResponse);
+  const result = await query('SELECT * FROM vehicle_events ORDER BY created_at DESC, id DESC LIMIT 500');
+  return result.rows.map(eventToResponse);
 }
 
 async function createVehicleEvent(input) {
-  const row = {
-    id: nextId('vehicleEvents'),
-    ...normalizeVehicleEvent(input),
-  };
+  const row = normalizeVehicleEvent(input);
+  const result = await query(
+    `
+      INSERT INTO vehicle_events (plate, direction, source, confidence, image_url, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6)
+      RETURNING *
+    `,
+    [row.plate, row.direction, row.source, row.confidence, row.imageUrl, row.createdAt],
+  );
 
-  state.vehicleEvents.push(row);
-  await persist();
-  return eventToResponse(row);
+  return eventToResponse(result.rows[0]);
 }
 
 async function updateVehicleEvent(url, input) {
   const id = Number(url.searchParams.get('id'));
-  const index = state.vehicleEvents.findIndex((row) => row.id === id);
+  const row = normalizeVehicleEvent(input);
+  const result = await query(
+    `
+      UPDATE vehicle_events
+      SET plate = $1,
+          direction = $2,
+          source = $3,
+          confidence = $4,
+          image_url = $5,
+          created_at = $6
+      WHERE id = $7
+      RETURNING *
+    `,
+    [row.plate, row.direction, row.source, row.confidence, row.imageUrl, row.createdAt, id],
+  );
 
-  if (index === -1) {
+  if (result.rowCount === 0) {
     const error = new Error('Maşın qeydi tapılmadı.');
     error.statusCode = 404;
     throw error;
   }
 
-  const updated = {
-    ...state.vehicleEvents[index],
-    ...normalizeVehicleEvent(input),
-    id,
-  };
-
-  state.vehicleEvents[index] = updated;
-  await persist();
-  return eventToResponse(updated);
+  return eventToResponse(result.rows[0]);
 }
 
 async function deleteVehicleEvent(url) {
@@ -630,61 +801,74 @@ async function deleteVehicleEvent(url) {
     throw error;
   }
 
-  state.vehicleEvents = state.vehicleEvents.filter((row) => row.id !== id);
-  await persist();
+  await query('DELETE FROM vehicle_events WHERE id = $1', [id]);
 }
 
 async function listWashExpenses(url) {
   const ilParam = url.searchParams.get('il');
   const ayParam = url.searchParams.get('ay');
-
-  let rows = state.washExpenses.slice();
+  const where = [];
+  const params = [];
 
   if (ilParam) {
-    const il = Number(ilParam);
-    rows = rows.filter((row) => new Date(row.expenseDate).getFullYear() === il);
+    params.push(Number(ilParam));
+    where.push(`EXTRACT(YEAR FROM expense_date) = $${params.length}`);
   }
 
   if (ayParam) {
     const month = monthIndex(ayParam);
     if (month >= 0) {
-      rows = rows.filter((row) => new Date(row.expenseDate).getMonth() === month);
+      params.push(month + 1);
+      where.push(`EXTRACT(MONTH FROM expense_date) = $${params.length}`);
     }
   }
 
-  return rows.sort(sortExpenses).slice(0, 1000).map(expenseToResponse);
+  const result = await query(
+    `SELECT * FROM wash_expenses${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY expense_date DESC, id DESC LIMIT 1000`,
+    params,
+  );
+
+  return result.rows.map(expenseToResponse);
 }
 
 async function createWashExpense(input) {
-  const row = {
-    id: nextId('washExpenses'),
-    ...normalizeExpense(input),
-  };
+  const row = normalizeExpense(input);
+  const result = await query(
+    `
+      INSERT INTO wash_expenses (expense_date, title, amount, note, created_at)
+      VALUES ($1,$2,$3,$4,$5)
+      RETURNING *
+    `,
+    [row.expenseDate, row.title, row.amount, row.note, row.createdAt],
+  );
 
-  state.washExpenses.push(row);
-  await persist();
-  return expenseToResponse(row);
+  return expenseToResponse(result.rows[0]);
 }
 
 async function updateWashExpense(url, input) {
   const id = Number(url.searchParams.get('id'));
-  const index = state.washExpenses.findIndex((row) => row.id === id);
+  const row = normalizeExpense(input);
+  const result = await query(
+    `
+      UPDATE wash_expenses
+      SET expense_date = $1,
+          title = $2,
+          amount = $3,
+          note = $4,
+          created_at = $5
+      WHERE id = $6
+      RETURNING *
+    `,
+    [row.expenseDate, row.title, row.amount, row.note, row.createdAt, id],
+  );
 
-  if (index === -1) {
+  if (result.rowCount === 0) {
     const error = new Error('Xərc tapılmadı.');
     error.statusCode = 404;
     throw error;
   }
 
-  const updated = {
-    ...state.washExpenses[index],
-    ...normalizeExpense(input),
-    id,
-  };
-
-  state.washExpenses[index] = updated;
-  await persist();
-  return expenseToResponse(updated);
+  return expenseToResponse(result.rows[0]);
 }
 
 async function deleteWashExpense(url) {
@@ -696,66 +880,81 @@ async function deleteWashExpense(url) {
     throw error;
   }
 
-  state.washExpenses = state.washExpenses.filter((row) => row.id !== id);
-  await persist();
+  await query('DELETE FROM wash_expenses WHERE id = $1', [id]);
 }
 
 async function listWaterReadings(url) {
   const ilParam = url.searchParams.get('il');
   const ayParam = url.searchParams.get('ay');
-
-  let rows = state.washWaterReadings.slice();
+  const where = [];
+  const params = [];
 
   if (ilParam) {
-    const il = Number(ilParam);
-    rows = rows.filter((row) => Number(row.il) === il);
+    params.push(Number(ilParam));
+    where.push(`il = $${params.length}`);
   }
 
   if (ayParam) {
-    rows = rows.filter((row) => row.ay === ayParam);
+    params.push(ayParam);
+    where.push(`ay = $${params.length}`);
   }
 
-  return rows.sort(sortWaterReadings).slice(0, 1000).map(waterReadingToResponse);
+  const result = await query(
+    `SELECT * FROM wash_water_readings${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY il DESC, ay DESC, id DESC LIMIT 1000`,
+    params,
+  );
+
+  return result.rows.sort(sortWaterReadings).map(waterReadingToResponse);
 }
 
 async function createWaterReading(input) {
-  const row = {
-    id: nextId('washWaterReadings'),
-    ...normalizeWaterReading(input),
-  };
+  const row = normalizeWaterReading(input);
+  const result = await query(
+    `
+      INSERT INTO wash_water_readings (il, ay, old_reading, new_reading, price_per_unit, usage_amount, total, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING *
+    `,
+    [row.il, row.ay, row.oldReading, row.newReading, row.pricePerUnit, row.usageAmount, row.total, row.createdAt],
+  );
 
-  state.washWaterReadings.push(row);
-  await persist();
-  return waterReadingToResponse(row);
+  return waterReadingToResponse(result.rows[0]);
 }
 
 async function updateWaterReading(url, input) {
   const id = Number(url.searchParams.get('id'));
-  const index = state.washWaterReadings.findIndex((row) => row.id === id);
+  const row = normalizeWaterReading(input);
+  const result = await query(
+    `
+      UPDATE wash_water_readings
+      SET il = $1,
+          ay = $2,
+          old_reading = $3,
+          new_reading = $4,
+          price_per_unit = $5,
+          usage_amount = $6,
+          total = $7,
+          created_at = $8
+      WHERE id = $9
+      RETURNING *
+    `,
+    [row.il, row.ay, row.oldReading, row.newReading, row.pricePerUnit, row.usageAmount, row.total, row.createdAt, id],
+  );
 
-  if (index === -1) {
+  if (result.rowCount === 0) {
     const error = new Error('Su göstəricisi tapılmadı.');
     error.statusCode = 404;
     throw error;
   }
 
-  const updated = {
-    ...state.washWaterReadings[index],
-    ...normalizeWaterReading(input),
-    id,
-  };
-
-  state.washWaterReadings[index] = updated;
-  await persist();
-  return waterReadingToResponse(updated);
+  return waterReadingToResponse(result.rows[0]);
 }
 
 async function deleteWaterReading(url) {
   const id = Number(url.searchParams.get('id'));
 
   if (id) {
-    state.washWaterReadings = state.washWaterReadings.filter((row) => row.id !== id);
-    await persist();
+    await query('DELETE FROM wash_water_readings WHERE id = $1', [id]);
     return;
   }
 
@@ -768,8 +967,7 @@ async function deleteWaterReading(url) {
     throw error;
   }
 
-  state.washWaterReadings = state.washWaterReadings.filter((row) => !(Number(row.il) === il && row.ay === ay));
-  await persist();
+  await query('DELETE FROM wash_water_readings WHERE il = $1 AND ay = $2', [il, ay]);
 }
 
 function sendJson(res, statusCode, payload) {
@@ -833,7 +1031,7 @@ async function handleRequest(req, res) {
   }
 
   if (url.pathname === '/api/health') {
-    sendJson(res, 200, { ok: true, database: 'json' });
+    sendJson(res, 200, { ok: true, database: 'postgresql' });
     return;
   }
 
@@ -942,15 +1140,12 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-loadState()
-  .then((loadedState) => {
-    state = loadedState;
-    server.listen(port, '0.0.0.0', () => {
-      console.log(`Backend http://localhost:${port} ünvanında işləyir`);
-      console.log('Storage: local JSON');
-    });
-  })
+initializeDatabase()
+  .then(() => server.listen(port, '0.0.0.0', () => {
+    console.log(`Backend http://localhost:${port} ünvanında işləyir`);
+    console.log('Storage: PostgreSQL');
+  }))
   .catch((error) => {
-    console.error('Lokal storage başladılmadı:', error.message);
+    console.error('PostgreSQL başladılmadı:', error.message);
     process.exit(1);
   });

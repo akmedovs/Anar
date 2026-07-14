@@ -1,6 +1,6 @@
 # Ubuntu Server Installation
 
-Bu sənəd `Anar` layihəsini Ubuntu VPS/server üzərində ayağa qaldırmaq üçün yazılıb.
+Bu sənəd `Anar` layihəsini Ubuntu serverdə PostgreSQL ilə ayağa qaldırmaq üçündür.
 
 ## Tövsiyə olunan resurslar
 
@@ -10,47 +10,61 @@ Bu sənəd `Anar` layihəsini Ubuntu VPS/server üzərində ayağa qaldırmaq ü
 - 2 GB RAM
 - 20 GB SSD
 
-Bu ölçü JSON storage ilə əsas frontend + backend üçün kifayətdir.
-
 ### Tövsiyə olunan
 
 - 2 vCPU
 - 4 GB RAM
 - 40 GB SSD
 
-Bu ölçü daha rahatdır və birdən çox istifadəçi üçün təhlükəsiz seçimdir.
-
 ### Recognition aktiv olacaqsa
-
-Əgər `vehicle-vision.py` ilə nömrə oxuma funksiyasını da işlədəcəksənsə:
 
 - 2 vCPU
 - 4 GB RAM minimum
 - 50 GB SSD daha rahatdır
 
-GPU şərt deyil, amma detector modeli ağır işləyəcəksə yük artır.
-
-## Serverdə lazım olan paketlər
+## Server paketləri
 
 ```bash
 sudo apt update
-sudo apt install -y git curl nginx python3 python3-pip tesseract-ocr
+sudo apt install -y git curl nginx python3 python3-pip tesseract-ocr postgresql postgresql-contrib
 ```
 
-Node.js 20 quraşdır:
+Node.js 20:
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-PM2 quraşdır:
+PM2:
 
 ```bash
 sudo npm install -g pm2
 ```
 
-## Layihəni yüklə
+## PostgreSQL qur
+
+```bash
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE DATABASE anar;
+CREATE USER anar_user WITH PASSWORD 'GUCLU_PAROL_YAZ';
+GRANT ALL PRIVILEGES ON DATABASE anar TO anar_user;
+\c anar
+GRANT ALL ON SCHEMA public TO anar_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anar_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anar_user;
+\q
+```
+
+## Layihəni çək
 
 ```bash
 cd /var/www
@@ -59,46 +73,42 @@ cd Anar
 npm install
 ```
 
-## Environment faylı
+## Environment
 
 ```bash
 cp .env.example .env
 ```
 
-İstəyə görə dəyiş:
+`.env` içində əsas dəyərlər:
 
 ```bash
 PORT=3001
+DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar
 VEHICLE_VISION_COMMAND=python3
 VEHICLE_YOLO_MODEL=/var/www/Anar/models/plate-yolo.pt
 VEHICLE_YOLO_CONF=0.25
 VEHICLE_OCR_CONFIG=--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
 ```
 
-## Build et
+## Build
 
 ```bash
 npm run build
 ```
 
-## Backend-i işə sal
+## Backend-i başlat
 
 ```bash
-PORT=3001 pm2 start server/server.js --name anar-api
+PORT=3001 DATABASE_URL=postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar pm2 start server/server.js --name anar-api
 pm2 save
-```
-
-Server açılışında avtomatik başlasın:
-
-```bash
 pm2 startup
 ```
 
-PM2-nin verdiyi əlavə əmri də icra et.
+PM2-nin verdiyi əlavə `sudo` komandasını da icra et.
 
-## Nginx config
+## Nginx
 
-`/etc/nginx/sites-available/anar` faylı yarat:
+`/etc/nginx/sites-available/anar`:
 
 ```nginx
 server {
@@ -132,7 +142,7 @@ server {
 }
 ```
 
-Enable et:
+Enable:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/anar /etc/nginx/sites-enabled/anar
@@ -142,21 +152,29 @@ sudo systemctl reload nginx
 
 ## Yoxlama
 
-Backend:
-
 ```bash
 curl http://127.0.0.1:3001/api/health
 ```
 
-Frontend:
+Gözlənən cavab:
 
-```bash
-curl -I http://127.0.0.1
+```json
+{"ok":true,"database":"postgresql"}
 ```
 
-## Recognition üçün əlavə paketlər
+## Backup
 
-Əgər nömrə oxuma funksiyasını aktiv edəcəksənsə, ayrıca Python paketləri də quraşdır:
+```bash
+pg_dump -Fc "postgres://anar_user:GUCLU_PAROL_YAZ@127.0.0.1:5432/anar" > /var/backups/anar.dump
+```
+
+Restore:
+
+```bash
+pg_restore -d anar /var/backups/anar.dump
+```
+
+## Recognition paketləri
 
 ```bash
 python3 -m venv .venv
@@ -165,11 +183,9 @@ pip install --upgrade pip
 pip install opencv-python ultralytics pytesseract
 ```
 
-Sonra `VEHICLE_YOLO_MODEL` dəyişənində trained model yolunu göstər.
-
 ## Qeyd
 
-- Bu layihə hazırkı vəziyyətdə PostgreSQL tələb etmir.
-- Data `server/db.json` içində saxlanır.
-- `server/db.json` və `server/uploads/` serverdə qalıcı saxlanmalıdır.
+- Data PostgreSQL-də saxlanır.
+- `server/uploads/` serverdə qalıcı saxlanmalıdır.
+- Köhnə `server/db.json` varsa, ilk startda avtomatik import edilir.
 
