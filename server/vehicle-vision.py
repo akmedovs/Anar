@@ -219,6 +219,7 @@ def get_ocr_configs():
     )
     configs = [
         default,
+        "--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
     ]
 
     seen = set()

@@ -30,7 +30,7 @@ services:
       VEHICLE_VISION_COMMAND: python3
       VEHICLE_YOLO_MODEL: ""
       VEHICLE_YOLO_CONF: 0.25
-      VEHICLE_OCR_CONFIG: --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
+      VEHICLE_OCR_CONFIG: --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-
     volumes:
       - anar_uploads:/app/server/uploads
     ports:
