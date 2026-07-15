@@ -37,7 +37,7 @@ function Shell() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={brandMark}>A</div>
           <div>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: theme.colors.text }}>Anar</div>
+            <div style={{ fontSize: '14px', fontWeight: 800, color: theme.colors.text, letterSpacing: '0.01em' }}>Anar</div>
             <div style={{ fontSize: '12px', color: theme.colors.muted }}>Kirayə və Aftoyuma Sistemi</div>
           </div>
         </div>
@@ -48,7 +48,7 @@ function Shell() {
           aria-label="Menyu aç"
           style={menuButton}
         >
-          <FiMenu size={22} />
+          <FiMenu size={21} />
         </button>
       </header>
 
@@ -123,14 +123,14 @@ function SideMenu({ open, onClose }) {
           right: 0,
           height: '100vh',
           width: isMobile ? 'min(88vw, 320px)' : '280px',
-          background: theme.colors.surface,
-          boxShadow: theme.shadow,
+          background: 'linear-gradient(180deg, rgba(255,253,249,0.98), rgba(248,243,234,0.98))',
+          boxShadow: '0 22px 60px rgba(15, 23, 42, 0.12)',
           transform: open ? 'translateX(0)' : 'translateX(100%)',
           transition: 'transform 220ms ease',
           zIndex: 20,
           display: 'flex',
           flexDirection: 'column',
-          borderLeft: '1px solid #e2e8f0',
+          borderLeft: `1px solid ${theme.colors.border}`,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 18px 12px' }}>
@@ -184,9 +184,9 @@ function MenuLink({ to, icon, children, active, onClick, meta = [] }) {
         borderRadius: theme.radius.md,
         textDecoration: 'none',
         color: active ? theme.colors.text : '#334155',
-        background: active ? theme.colors.softPrimary : 'transparent',
+        background: active ? 'linear-gradient(180deg, rgba(15,118,110,0.08), rgba(15,118,110,0.04))' : 'transparent',
         border: '1px solid',
-        borderColor: active ? '#cdd9f7' : 'transparent',
+        borderColor: active ? 'rgba(15,118,110,0.14)' : 'transparent',
         fontWeight: 700,
         fontSize: '14px',
       }}
@@ -215,9 +215,10 @@ const headerStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  background: 'rgba(255,255,255,0.92)',
-  backdropFilter: 'blur(14px)',
+  background: 'rgba(255,253,249,0.88)',
+  backdropFilter: 'blur(18px)',
   borderBottom: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 10px 30px rgba(15, 23, 42, 0.04)',
   position: 'sticky',
   top: 0,
   zIndex: 10,
@@ -233,11 +234,12 @@ const brandMark = {
   width: '38px',
   height: '38px',
   borderRadius: '11px',
-  background: `linear-gradient(135deg, ${theme.colors.primaryDark}, ${theme.colors.teal})`,
+  background: `linear-gradient(135deg, ${theme.colors.primaryDark}, ${theme.colors.amber})`,
   color: '#ffffff',
   display: 'grid',
   placeItems: 'center',
   fontWeight: 800,
+  boxShadow: '0 10px 20px rgba(15, 118, 110, 0.18)',
 };
 
 const menuButton = {
@@ -245,11 +247,12 @@ const menuButton = {
   height: '42px',
   borderRadius: '12px',
   border: `1px solid ${theme.colors.border}`,
-  background: '#ffffff',
+  background: 'linear-gradient(180deg, #ffffff, #faf7f2)',
   color: theme.colors.text,
   display: 'grid',
   placeItems: 'center',
   cursor: 'pointer',
+  boxShadow: '0 10px 20px rgba(15, 23, 42, 0.05)',
 };
 
 const mainStyle = { padding: '18px 16px 28px' };
@@ -260,7 +263,7 @@ const closeButton = {
   height: '38px',
   borderRadius: '12px',
   border: `1px solid ${theme.colors.border}`,
-  background: '#ffffff',
+  background: 'linear-gradient(180deg, #ffffff, #faf7f2)',
   color: theme.colors.text,
   display: 'grid',
   placeItems: 'center',
@@ -280,8 +283,8 @@ const menuMetaPill = (active, index) => ({
   gap: '4px',
   padding: '4px 7px',
   borderRadius: theme.radius.pill,
-  border: `1px solid ${active ? '#bfd0fb' : theme.colors.border}`,
-  background: active ? '#f7faff' : theme.colors.surfaceSoft,
+  border: `1px solid ${active ? 'rgba(15,118,110,0.14)' : theme.colors.border}`,
+  background: active ? 'rgba(15,118,110,0.08)' : theme.colors.surfaceSoft,
   color: index === 0 ? theme.colors.primaryDark : theme.colors.muted,
   fontSize: '10px',
   fontWeight: 800,

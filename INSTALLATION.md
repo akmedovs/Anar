@@ -57,6 +57,9 @@ cd Anar
 docker compose up -d --build
 ```
 
+Əgər yol oxuma / OCR hissəsi işləyirsə, `tesseract-ocr` image-in içində artıq olur.
+YOLO modeli verməsən belə, ən son kodda skript OCR-only rejimə düşür.
+
 ## 6. Yoxlama
 
 Frontend:
@@ -113,9 +116,23 @@ cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
 - sonra reverse proxy sorğunu `127.0.0.1:5173`-ə yönləndirir
 - lazım olsa backend üçün `127.0.0.1:3001` ayrıca açıq qalır
 
+## YOLO + OCR qeydi
+
+`VEHICLE_YOLO_MODEL` yalnız xüsusi hazırlanmış plate detector modeli olduqda doldurulur.
+Əgər bu dəyişən boşdursa, layihənin son versiyası plate detektoru olmadan da OCR ilə işləməyə çalışır.
+
+Ubuntu serverdə bu hissəni yeniləmək üçün:
+
+```bash
+cd /var/www/Anar
+git pull
+docker compose up -d --build
+```
+
+Əgər maşın nömrəsi tanınmırsa, serverdə `tesseract-ocr` və layihənin son `server/vehicle-vision.py` faylı aktiv olmalıdır.
+
 ## Qeyd
 
 - `pm2` istifadə olunmur.
 - `npm run dev` tələb olunmur.
 - Hər şey `docker compose up -d --build` ilə qalxır.
-

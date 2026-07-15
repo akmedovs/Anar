@@ -584,66 +584,119 @@ const hero = {
   alignItems: 'end',
   gap: '12px',
   flexWrap: 'wrap',
-  padding: '18px',
-  borderRadius: theme.radius.lg,
-  background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
+  padding: '20px',
+  borderRadius: '24px',
+  background:
+    'linear-gradient(135deg, rgba(255,253,249,0.98) 0%, rgba(248,243,234,0.98) 100%)',
   border: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 20px 55px rgba(15, 23, 42, 0.08)',
 };
 const heroMobile = { ...hero, padding: '14px', alignItems: 'stretch', flexDirection: 'column' };
-const eyebrow = { fontSize: '11px', fontWeight: 900, color: theme.colors.primaryDark, letterSpacing: '0.08em', marginBottom: '6px' };
-const title = { margin: 0, fontSize: '30px', color: theme.colors.text };
+const eyebrow = { fontSize: '11px', fontWeight: 900, color: theme.colors.amber, letterSpacing: '0.14em', marginBottom: '8px' };
+const title = { margin: 0, fontSize: '30px', color: theme.colors.text, letterSpacing: '-0.03em' };
 const titleMobile = { ...title, fontSize: '22px' };
-const sub = { margin: '6px 0 0', color: theme.colors.muted, fontSize: '13px' };
+const sub = { margin: '8px 0 0', color: theme.colors.muted, fontSize: '13px', lineHeight: 1.6, maxWidth: '72ch' };
 const filterStack = { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'end' };
 const filterStackMobile = { display: 'grid', gap: '10px', width: '100%' };
 const labelStyle = { display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: 700, color: theme.colors.muted };
-const control = { width: '150px', padding: '10px 12px', borderRadius: '10px', border: `1px solid ${theme.colors.border}`, background: '#fff', fontSize: '14px', boxSizing: 'border-box' };
+const control = {
+  width: '150px',
+  padding: '10px 12px',
+  borderRadius: '12px',
+  border: `1px solid ${theme.colors.border}`,
+  background: 'linear-gradient(180deg, #ffffff 0%, #faf7f2 100%)',
+  fontSize: '14px',
+  boxSizing: 'border-box',
+  color: theme.colors.text,
+  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.04)',
+};
 const controlMobile = { ...control, width: '100%' };
 const navGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' };
-const navCard = { display: 'flex', alignItems: 'center', gap: '14px', padding: '16px', borderRadius: theme.radius.lg, background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, textDecoration: 'none', color: theme.colors.text, boxShadow: theme.shadow };
-const navIcon = { width: '46px', height: '46px', borderRadius: '14px', display: 'grid', placeItems: 'center', background: theme.colors.softPrimary, color: theme.colors.primaryDark, flex: '0 0 auto' };
+const navCard = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '14px',
+  padding: '16px',
+  borderRadius: '18px',
+  background: 'linear-gradient(180deg, #fffdf9 0%, #fbf7f1 100%)',
+  border: `1px solid ${theme.colors.border}`,
+  textDecoration: 'none',
+  color: theme.colors.text,
+  boxShadow: '0 16px 38px rgba(15, 23, 42, 0.06)',
+};
+const navIcon = {
+  width: '46px',
+  height: '46px',
+  borderRadius: '14px',
+  display: 'grid',
+  placeItems: 'center',
+  background: 'linear-gradient(180deg, rgba(15,118,110,0.12), rgba(15,118,110,0.06))',
+  color: theme.colors.primaryDark,
+  flex: '0 0 auto',
+};
 const navTitle = { fontSize: '16px', fontWeight: 900, marginBottom: '4px' };
 const navDesc = { fontSize: '13px', color: theme.colors.muted, lineHeight: 1.4 };
-const panel = { padding: '16px', borderRadius: theme.radius.lg, background: theme.colors.surface, border: `1px solid ${theme.colors.border}`, boxShadow: theme.shadow, display: 'grid', gap: '14px' };
+const panel = {
+  padding: '16px',
+  borderRadius: '22px',
+  background: 'linear-gradient(180deg, rgba(255,253,249,0.98), rgba(251,247,240,0.98))',
+  border: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 18px 44px rgba(15, 23, 42, 0.06)',
+  display: 'grid',
+  gap: '14px',
+};
 const sectionHead = { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' };
 const monthlyHead = { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' };
-const sectionEyebrow = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 900, color: theme.colors.primaryDark, letterSpacing: '0.08em', marginBottom: '4px' };
+const sectionEyebrow = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 900, color: theme.colors.amber, letterSpacing: '0.14em', marginBottom: '4px' };
 const sectionTitle = { margin: 0, fontSize: '18px', color: theme.colors.text };
 const summaryGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px' };
-const kpiCard = { padding: '12px', borderRadius: '14px', border: `1px solid ${theme.colors.border}` };
+const kpiCard = {
+  padding: '12px',
+  borderRadius: '16px',
+  border: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)',
+};
 const kpiLabel = { fontSize: '11px', fontWeight: 800, letterSpacing: '0.02em' };
 const kpiValue = { fontSize: '17px', fontWeight: 900, marginTop: '5px', lineHeight: 1.25 };
 const chartGrid = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: '12px', alignItems: 'start' };
 const chartGridMobile = { ...chartGrid, gridTemplateColumns: '1fr' };
-const miniPanel = { padding: '14px', borderRadius: '14px', background: theme.colors.surfaceSoft, border: `1px solid ${theme.colors.border}`, display: 'grid', gap: '10px' };
+const miniPanel = {
+  padding: '14px',
+  borderRadius: '16px',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.92), rgba(250,246,239,0.92))',
+  border: `1px solid ${theme.colors.border}`,
+  display: 'grid',
+  gap: '10px',
+};
 const miniHead = { fontSize: '14px', fontWeight: 900, color: theme.colors.text };
 const houseList = { display: 'grid', gap: '8px' };
-const houseRow = { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${theme.colors.border}` };
+const houseRow = { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid rgba(229, 218, 204, 0.7)` };
 const houseMeta = { fontSize: '12px', color: theme.colors.muted, marginTop: '4px' };
 const houseTotal = { fontSize: '14px', color: theme.colors.success };
 const tableWrap = { marginTop: '12px' };
 const todayTable = { display: 'grid', gap: '8px' };
-const todayHead = { display: 'grid', gridTemplateColumns: '1fr 0.8fr 0.8fr', gap: '8px', padding: '10px 12px', borderRadius: '12px', background: theme.colors.surfaceSoft, color: theme.colors.muted, fontSize: '12px', fontWeight: 800 };
-const todayRow = { display: 'grid', gridTemplateColumns: '1fr 0.8fr 0.8fr', gap: '8px', padding: '10px 12px', borderRadius: '12px', background: '#fff', border: `1px solid ${theme.colors.border}`, alignItems: 'center', fontSize: '13px' };
+const todayHead = { display: 'grid', gridTemplateColumns: '1fr 0.8fr 0.8fr', gap: '8px', padding: '10px 12px', borderRadius: '12px', background: 'rgba(15,118,110,0.06)', color: theme.colors.muted, fontSize: '12px', fontWeight: 800 };
+const todayRow = { display: 'grid', gridTemplateColumns: '1fr 0.8fr 0.8fr', gap: '8px', padding: '10px 12px', borderRadius: '12px', background: '#fffefc', border: `1px solid ${theme.colors.border}`, alignItems: 'center', fontSize: '13px', boxShadow: '0 10px 22px rgba(15, 23, 42, 0.03)' };
 const barScroll = { overflowX: 'auto' };
 const barGrid = { display: 'grid', gridTemplateColumns: 'repeat(12, minmax(48px, 1fr))', gap: '8px', alignItems: 'end', minWidth: '620px' };
 const barGridMobile = { ...barGrid, minWidth: '760px' };
 const barItem = { display: 'grid', gap: '6px', justifyItems: 'center' };
-const barTrack = { width: '100%', height: '150px', borderRadius: '12px', background: 'linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%)', border: `1px solid ${theme.colors.border}`, display: 'flex', alignItems: 'flex-end', padding: '8px' };
-const barFill = { width: '100%', borderRadius: '8px', background: 'linear-gradient(180deg, #2563eb 0%, #0f766e 100%)', minHeight: '6px' };
+const barTrack = { width: '100%', height: '150px', borderRadius: '12px', background: 'linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(241,233,221,0.9) 100%)', border: `1px solid ${theme.colors.border}`, display: 'flex', alignItems: 'flex-end', padding: '8px' };
+const barFill = { width: '100%', borderRadius: '8px', background: 'linear-gradient(180deg, #0f766e 0%, #b45309 100%)', minHeight: '6px' };
 const barValue = { fontSize: '11px', fontWeight: 900, color: theme.colors.primaryDark };
 const barLabel = { fontSize: '11px', color: theme.colors.muted, fontWeight: 700 };
 const chartHint = { textAlign: 'right', fontSize: '12px', color: theme.colors.muted };
-const notice = { padding: '12px 14px', borderRadius: theme.radius.md, background: '#eff6ff', border: '1px solid #bfdbfe', color: theme.colors.primaryDark, fontSize: '13px' };
-const errorBox = { padding: '12px 14px', borderRadius: theme.radius.md, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '13px' };
-const emptyBox = { padding: '18px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surfaceSoft, borderRadius: theme.radius.md };
+const notice = { padding: '12px 14px', borderRadius: theme.radius.md, background: 'rgba(15,118,110,0.08)', border: '1px solid rgba(15,118,110,0.16)', color: theme.colors.primaryDark, fontSize: '13px' };
+const errorBox = { padding: '12px 14px', borderRadius: theme.radius.md, background: 'rgba(194,65,12,0.08)', border: '1px solid rgba(194,65,12,0.16)', color: '#9a3412', fontSize: '13px' };
+const emptyBox = { padding: '18px', textAlign: 'center', color: theme.colors.muted, background: theme.colors.surfaceSoft, borderRadius: theme.radius.md, border: `1px dashed ${theme.colors.border}` };
 const expenseSection = { display: 'grid', gap: '12px', paddingTop: '2px' };
 const expenseList = { display: 'grid', gap: '12px' };
 const expenseGroup = {
   padding: '12px',
-  borderRadius: theme.radius.md,
+  borderRadius: '16px',
   border: `1px solid ${theme.colors.border}`,
-  background: '#fff',
+  background: '#fffefc',
+  boxShadow: '0 10px 22px rgba(15, 23, 42, 0.03)',
 };
 const expenseGroupHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' };
 const expenseGroupTitle = { color: theme.colors.text, fontSize: '15px' };
@@ -651,8 +704,8 @@ const expenseGroupCount = { fontSize: '12px', color: theme.colors.muted, fontWei
 const expenseCards = { display: 'grid', gap: '10px' };
 const expenseCardRow = {
   padding: '12px',
-  borderRadius: theme.radius.md,
-  background: theme.colors.surfaceSoft,
+  borderRadius: '14px',
+  background: 'linear-gradient(180deg, #ffffff 0%, #faf7f2 100%)',
   border: `1px solid ${theme.colors.border}`,
 };
 const expenseCardTop = { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' };
@@ -660,7 +713,7 @@ const expenseCardBottom = { display: 'flex', gap: '8px', flexWrap: 'wrap', margi
 const expenseName = { fontSize: '14px', fontWeight: 800, color: theme.colors.text };
 const expenseAmount = { fontSize: '15px', fontWeight: 900, color: theme.colors.primaryDark };
 const expenseDate = { fontSize: '12px', color: theme.colors.muted, fontWeight: 700 };
-const expenseNote = { fontSize: '12px', color: theme.colors.text, background: '#fff', padding: '4px 8px', borderRadius: '999px', border: `1px solid ${theme.colors.border}` };
+const expenseNote = { fontSize: '12px', color: theme.colors.text, background: 'rgba(255,255,255,0.85)', padding: '4px 8px', borderRadius: '999px', border: `1px solid ${theme.colors.border}` };
 const emptyExpense = { padding: '18px', borderRadius: theme.radius.md, border: `1px dashed ${theme.colors.border}`, color: theme.colors.muted, background: theme.colors.surfaceSoft };
 const cardBadge = (active) => ({
   padding: '6px 10px',
@@ -668,8 +721,8 @@ const cardBadge = (active) => ({
   fontSize: '11px',
   fontWeight: 800,
   color: active ? theme.colors.primaryDark : theme.colors.muted,
-  background: active ? theme.colors.softPrimary : theme.colors.surfaceSoft,
-  border: `1px solid ${active ? '#bfd0fb' : theme.colors.border}`,
+  background: active ? 'rgba(15,118,110,0.08)' : theme.colors.surfaceSoft,
+  border: `1px solid ${active ? 'rgba(15,118,110,0.14)' : theme.colors.border}`,
   whiteSpace: 'nowrap',
 });
 
