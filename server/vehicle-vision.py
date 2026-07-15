@@ -45,10 +45,24 @@ def normalize_plate_candidate(raw):
     for candidate in (translated, value):
         for pattern in patterns:
             match = pattern.search(candidate)
-            if match:
-                return match.group(1)
+            if not match:
+                continue
 
-    return translated or value
+            plate = match.group(1)
+            if len(plate) < 6:
+                continue
+            if not any(ch.isdigit() for ch in plate):
+                continue
+            if not any(ch.isalpha() for ch in plate):
+                continue
+            return plate
+
+    if len(translated) >= 6 and any(ch.isdigit() for ch in translated) and any(ch.isalpha() for ch in translated):
+        return translated
+    if len(value) >= 6 and any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value):
+        return value
+
+    return ""
 
 
 def preprocess_for_ocr(image):
@@ -118,6 +132,8 @@ def plate_score(candidate):
         score += 5
     if any(ch.isalpha() for ch in candidate):
         score += 5
+    if len(candidate) < 6:
+        score -= 100
 
     return score
 
