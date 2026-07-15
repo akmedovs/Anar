@@ -239,6 +239,18 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
 
     try:
         if cv2_module is not None and image is not None:
+            baseline_variants = build_ocr_variants(image)[:2]
+            for variant_index, variant in enumerate(baseline_variants):
+                suffix = f'.ocr-base-{variant_index}.png'
+                temp_path = image_path.with_suffix(suffix)
+                temp_paths.append(temp_path)
+                cv2_module.imwrite(str(temp_path), variant)
+                for config in get_ocr_configs():
+                    text = run_tesseract_ocr(temp_path, config)
+                    plate = clean_plate(text)
+                    if plate:
+                        candidates.append((plate_score(plate), plate, text.strip(), config))
+
             region_candidates = build_region_candidates(image)
             for region_index, region in enumerate(region_candidates):
                 for variant_index, variant in enumerate(build_ocr_variants(region)[:3]):
