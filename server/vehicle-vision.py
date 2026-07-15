@@ -128,11 +128,9 @@ def build_region_candidates(image):
     height, width = image.shape[:2]
     crops = []
     boxes = [
-        (0.15, 0.50, 0.85, 0.95),
-        (0.20, 0.55, 0.82, 0.90),
-        (0.18, 0.60, 0.88, 0.93),
-        (0.08, 0.45, 0.92, 0.98),
-        (0.30, 0.58, 0.78, 0.88),
+        (0.12, 0.58, 0.88, 0.94),
+        (0.18, 0.62, 0.84, 0.92),
+        (0.08, 0.50, 0.92, 0.98),
     ]
 
     for left, top, right, bottom in boxes:
@@ -166,7 +164,7 @@ def build_region_candidates(image):
             scored.append((score, image[max(0, y - 8):min(height, y + h + 8), max(0, x - 12):min(width, x + w + 12)]))
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        crops.extend([crop for _, crop in scored[:4]])
+        crops.extend([crop for _, crop in scored[:2]])
     except Exception:
         pass
 
@@ -221,8 +219,6 @@ def get_ocr_configs():
     )
     configs = [
         default,
-        "--psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
-        "--psm 13 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
     ]
 
     seen = set()
@@ -245,7 +241,7 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         if cv2_module is not None and image is not None:
             region_candidates = build_region_candidates(image)
             for region_index, region in enumerate(region_candidates):
-                for variant_index, variant in enumerate(build_ocr_variants(region)):
+                for variant_index, variant in enumerate(build_ocr_variants(region)[:3]):
                     suffix = f'.ocr-{region_index}-{variant_index}.png'
                     temp_path = image_path.with_suffix(suffix)
                     temp_paths.append(temp_path)
