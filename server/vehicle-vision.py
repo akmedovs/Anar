@@ -159,6 +159,20 @@ def tesseract_language():
     return value
 
 
+def tesseract_configs():
+    whitelist = os.environ.get('VEHICLE_TESSERACT_WHITELIST', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-').strip()
+    base_flags = [
+        '--oem 3 --psm 7',
+        '--oem 3 --psm 6',
+        '--oem 3 --psm 8',
+        '--oem 3 --psm 11',
+        '--oem 3 --psm 13',
+    ]
+    if whitelist:
+        return [f'{flags} -c tessedit_char_whitelist={whitelist}' for flags in base_flags]
+    return base_flags
+
+
 @lru_cache(maxsize=1)
 def load_paddle_ocr():
     try:
@@ -187,14 +201,14 @@ def run_paddle_ocr(image):
     raise RuntimeError('PaddleOCR API is not supported by the installed version.')
 
 
-def run_tesseract_ocr(image):
+def run_tesseract_ocr(image, config=None):
     try:
         import pytesseract
     except Exception as error:
         raise RuntimeError(f'Tesseract import failed: {error}')
 
     lang = tesseract_language()
-    config = os.environ.get('VEHICLE_TESSERACT_CONFIG', '--psm 7 --oem 3').strip() or '--psm 7 --oem 3'
+    config = config or os.environ.get('VEHICLE_TESSERACT_CONFIG', '--oem 3 --psm 7').strip() or '--oem 3 --psm 7'
 
     data = None
     try:
@@ -535,17 +549,28 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
             continue
 
         for variant_index, variant in enumerate(build_ocr_variants(region)):
-            try:
-                if backend == 'paddle':
+            if backend == 'paddle':
+                try:
                     ocr_result = run_paddle_ocr(variant)
-                else:
-                    ocr_result = run_tesseract_ocr(variant)
-            except Exception:
+                except Exception:
+                    continue
+
+                lines = iter_ocr_lines(ocr_result)
+                strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
+                loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False))
                 continue
 
-            lines = iter_ocr_lines(ocr_result)
-            strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
-            if not strict_candidates:
+            for ocr_config in tesseract_configs():
+                try:
+                    ocr_result = run_tesseract_ocr(variant, config=ocr_config)
+                except Exception:
+                    continue
+
+                lines = iter_ocr_lines(ocr_result)
+                if not lines:
+                    continue
+
+                strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
                 loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False))
 
     candidates = strict_candidates or loose_candidates
