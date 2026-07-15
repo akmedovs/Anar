@@ -116,6 +116,63 @@ def build_ocr_variants(image):
     return variants
 
 
+def build_region_candidates(image):
+    try:
+        import cv2
+    except Exception:
+        return [image] if image is not None else []
+
+    if image is None:
+        return []
+
+    height, width = image.shape[:2]
+    crops = []
+    boxes = [
+        (0.15, 0.50, 0.85, 0.95),
+        (0.20, 0.55, 0.82, 0.90),
+        (0.18, 0.60, 0.88, 0.93),
+        (0.08, 0.45, 0.92, 0.98),
+        (0.30, 0.58, 0.78, 0.88),
+    ]
+
+    for left, top, right, bottom in boxes:
+        x1 = max(0, int(width * left))
+        y1 = max(0, int(height * top))
+        x2 = min(width, int(width * right))
+        y2 = min(height, int(height * bottom))
+        if x2 - x1 < 40 or y2 - y1 < 20:
+            continue
+        crop = image[y1:y2, x1:x2]
+        crops.append(crop)
+
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 80, 200)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        scored = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if w < 40 or h < 15:
+                continue
+            ratio = w / max(h, 1)
+            area = w * h
+            if ratio < 1.5 or ratio > 8.5:
+                continue
+            if area < (width * height) * 0.01 or area > (width * height) * 0.20:
+                continue
+            if y < height * 0.35:
+                continue
+            score = area * (1 + min(ratio, 6) / 6)
+            scored.append((score, image[max(0, y - 8):min(height, y + h + 8), max(0, x - 12):min(width, x + w + 12)]))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        crops.extend([crop for _, crop in scored[:4]])
+    except Exception:
+        pass
+
+    return crops or [image]
+
+
 def plate_score(candidate):
     if not candidate:
         return 0
@@ -186,17 +243,18 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
 
     try:
         if cv2_module is not None and image is not None:
-            variants = build_ocr_variants(image)
-            for index, variant in enumerate(variants):
-                suffix = f'.ocr-{index}.png'
-                temp_path = image_path.with_suffix(suffix)
-                temp_paths.append(temp_path)
-                cv2_module.imwrite(str(temp_path), variant)
-                for config in get_ocr_configs():
-                    text = run_tesseract_ocr(temp_path, config)
-                    plate = clean_plate(text)
-                    if plate:
-                        candidates.append((plate_score(plate), plate, text.strip(), config))
+            region_candidates = build_region_candidates(image)
+            for region_index, region in enumerate(region_candidates):
+                for variant_index, variant in enumerate(build_ocr_variants(region)):
+                    suffix = f'.ocr-{region_index}-{variant_index}.png'
+                    temp_path = image_path.with_suffix(suffix)
+                    temp_paths.append(temp_path)
+                    cv2_module.imwrite(str(temp_path), variant)
+                    for config in get_ocr_configs():
+                        text = run_tesseract_ocr(temp_path, config)
+                        plate = clean_plate(text)
+                        if plate:
+                            candidates.append((plate_score(plate), plate, text.strip(), config))
         else:
             for config in get_ocr_configs():
                 text = run_tesseract_ocr(image_path, config)
