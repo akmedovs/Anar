@@ -402,7 +402,7 @@ def compute_candidate_score(text_score, detector_score, plate):
     return score
 
 
-def extract_candidates(ocr_lines, detector_score, source_label, region_label):
+def extract_candidates(ocr_lines, detector_score, source_label, region_label, strict_only=True):
     candidates = []
     for line in ocr_lines:
         text = str(line.get('text') or '').strip()
@@ -410,7 +410,13 @@ def extract_candidates(ocr_lines, detector_score, source_label, region_label):
             continue
 
         plate = normalize_plate_candidate(text)
-        if not plate or not is_strict_plate(plate):
+        if not plate:
+            continue
+
+        strict = is_strict_plate(plate)
+        if strict_only and not strict:
+            continue
+        if not strict_only and (len(plate) < 5 or not any(ch.isdigit() for ch in plate) or not any(ch.isalpha() for ch in plate)):
             continue
 
         text_score = float(line.get('confidence') or 0.0)
@@ -422,6 +428,7 @@ def extract_candidates(ocr_lines, detector_score, source_label, region_label):
             'score': round(compute_candidate_score(text_score, detector_score, plate), 2),
             'source': source_label,
             'region': region_label,
+            'strict': strict,
         }
         candidates.append(candidate)
 
@@ -511,7 +518,8 @@ def detect_plate_region(image_path, image):
     }
 
 def run_multi_pass_ocr(image_path, image, cv2_module):
-    candidates = []
+    strict_candidates = []
+    loose_candidates = []
 
     if image is None:
         return None
@@ -536,8 +544,11 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
                 continue
 
             lines = iter_ocr_lines(ocr_result)
-            candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}'))
+            strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
+            if not strict_candidates:
+                loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False))
 
+    candidates = strict_candidates or loose_candidates
     if not candidates:
         return None
 
@@ -551,6 +562,7 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         'confidence': best['confidence'],
         'source': best['source'],
         'backend': backend,
+        'strictPlate': bool(best.get('strict')),
         'candidates': candidates[:5],
     }
 
@@ -607,12 +619,14 @@ def main():
         best_display_plate = ocr_result.get('displayPlate') or format_plate_display(best_plate)
         ocr_confidence = float(ocr_result.get('confidence') or 0.0)
         detector_ok = detector_confidence is not None and detector_confidence >= AUTO_ACCEPT_MIN_DET_SCORE
+        strict_plate = bool(ocr_result.get('strictPlate'))
         auto_accept = bool(
             detector.get('configured', False)
             and detector.get('bbox')
             and detector_ok
             and ocr_confidence >= AUTO_ACCEPT_MIN_OCR_SCORE
             and best_plate
+            and strict_plate
         )
 
         manual_review_required = not auto_accept
@@ -626,6 +640,10 @@ def main():
             reason = 'YOLO confidence azdir'
         elif ocr_confidence < AUTO_ACCEPT_MIN_OCR_SCORE:
             reason = 'PaddleOCR confidence azdir'
+        elif best_plate and not strict_plate:
+            reason = 'Strict regex namizəd tapilmadi'
+        else:
+            reason = reason or 'Plate text could not be recognized.'
 
         payload = {
             'status': 'accepted' if not manual_review_required else 'manual_review',

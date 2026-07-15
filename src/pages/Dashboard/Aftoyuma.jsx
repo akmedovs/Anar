@@ -165,7 +165,11 @@ function DashboardAftoyuma() {
           setRecognitionMessage(`Oxundu: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`);
         }
       } else {
-        setRecognitionMessage(reviewRequired ? 'Təsdiq tələb olunur, amma namizəd tapılmadı.' : 'Nömrə oxunmadı.');
+        if (reviewRequired && candidates.length) {
+          setRecognitionMessage('Təsdiq tələb olunur. Aşağıdakı namizədlərdən birini seç.');
+        } else {
+          setRecognitionMessage(reviewRequired ? 'Təsdiq tələb olunur, amma namizəd tapılmadı.' : 'Nömrə oxunmadı.');
+        }
       }
     } catch (error) {
       setRecognitionMessage(error.message || 'Şəkil oxunmadı.');
