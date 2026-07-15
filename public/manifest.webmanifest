@@ -1,7 +1,7 @@
 {
-  "name": "Anar Kiraye ve Aftoyuma",
-  "short_name": "Anar",
-  "description": "Kiraye ve aftoyuma hesabat sistemi",
+  "name": "Gloss Garage Avtoyuma/Detailing",
+  "short_name": "Gloss Garage",
+  "description": "Gloss Garage Avtoyuma/Detailing",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
