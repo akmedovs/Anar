@@ -75,9 +75,9 @@ cp .env.example .env
 - `DATABASE_URL`
 - `PORT` - backend portu, default `3001`
 - `VEHICLE_VISION_COMMAND` - default `python3`
-- `VEHICLE_YOLO_MODEL` - opsional; boş qala bilər, bu halda OCR-only fallback işləyir
+- `VEHICLE_OCR_LANG` - PaddleOCR dili, default `en`
+- `VEHICLE_YOLO_MODEL` - plate detector modeli; boşdursa sistem manual review rejimində qalır
 - `VEHICLE_YOLO_CONF`
-- `VEHICLE_OCR_CONFIG`
 
 ## Yedəkləmə
 

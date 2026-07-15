@@ -42,7 +42,6 @@ const uploadsDir = path.resolve(process.cwd(), 'server/uploads/vehicle-captures'
 const visionScript = path.resolve(process.cwd(), 'server/vehicle-vision.py');
 const visionCommand = process.env.VEHICLE_VISION_COMMAND || 'python3';
 const visionModel = process.env.VEHICLE_YOLO_MODEL || '';
-const visionOcrConfig = process.env.VEHICLE_OCR_CONFIG || '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-';
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
@@ -466,11 +465,10 @@ function runVisionScript(imagePath) {
       visionCommand,
       [visionScript, imagePath],
       {
-        env: {
-          ...process.env,
-          VEHICLE_YOLO_MODEL: visionModel,
-          VEHICLE_OCR_CONFIG: visionOcrConfig,
-        },
+      env: {
+        ...process.env,
+        VEHICLE_YOLO_MODEL: visionModel,
+      },
         timeout: 120000,
         maxBuffer: 1024 * 1024,
       },
@@ -497,6 +495,8 @@ function runVisionScript(imagePath) {
           const parsed = JSON.parse(output);
           console.log('[vehicle-vision] script result', {
             imagePath,
+            status: parsed?.status,
+            reviewRequired: parsed?.manualReviewRequired,
             plate: parsed?.plate,
             source: parsed?.source,
             confidence: parsed?.confidence,
@@ -547,12 +547,42 @@ async function recognizeVehicleCapture(input) {
     imageBytes: imageDataUrl.length,
   });
   const visionResult = await runVisionScript(capture.absPath);
-  const plate = normalizePlate(visionResult?.plate || visionResult?.text || '');
+  const reviewRequired = Boolean(visionResult?.manualReviewRequired || visionResult?.status === 'manual_review');
+  const plate = normalizePlate(
+    visionResult?.plate
+      || visionResult?.displayPlate
+      || visionResult?.suggestedPlate
+      || visionResult?.event?.plate
+      || visionResult?.text
+      || '',
+  );
   const confidence = visionResult?.confidence === undefined || visionResult?.confidence === null || visionResult?.confidence === ''
     ? null
     : toNumber(visionResult.confidence);
+  const responsePayload = {
+    ok: true,
+    saved: false,
+    reviewRequired,
+    reason: visionResult?.reason || null,
+    captureUrl: capture.publicPath,
+    vision: visionResult,
+    plate,
+    displayPlate: visionResult?.displayPlate || plate,
+    confidence,
+    candidates: Array.isArray(visionResult?.candidates) ? visionResult.candidates : [],
+    event: plate ? {
+      plate,
+      direction,
+      source: reviewRequired ? 'camera-review' : source,
+      confidence,
+      amount: toNumber(input.amount),
+      note: String(input.note || '').trim(),
+      imageUrl: capture.publicPath,
+      createdAt: createdAt || new Date().toISOString(),
+    } : null,
+  };
 
-  if (!plate) {
+  if (!plate && !reviewRequired) {
     console.error('[vehicle-vision] plate rejected', {
       captureUrl: capture.publicPath,
       visionResult,
@@ -564,7 +594,11 @@ async function recognizeVehicleCapture(input) {
     throw error;
   }
 
-  const payload = {
+  if (reviewRequired || !saveEvent) {
+    return responsePayload;
+  }
+
+  const event = await createVehicleEvent({
     plate,
     direction,
     source,
@@ -573,24 +607,10 @@ async function recognizeVehicleCapture(input) {
     note: String(input.note || '').trim(),
     imageUrl: capture.publicPath,
     createdAt: createdAt || new Date().toISOString(),
-  };
-
-  if (!saveEvent) {
-    return {
-      ok: true,
-      saved: false,
-      captureUrl: capture.publicPath,
-      vision: visionResult,
-      event: payload,
-    };
-  }
-
-  const event = await createVehicleEvent(payload);
+  });
   return {
-    ok: true,
+    ...responsePayload,
     saved: true,
-    captureUrl: capture.publicPath,
-    vision: visionResult,
     event,
   };
 }

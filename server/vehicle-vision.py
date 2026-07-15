@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import json
 import os
-import shlex
 import re
-import subprocess
 import sys
-import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -76,101 +74,6 @@ def preprocess_for_ocr(image):
     return gray
 
 
-def build_ocr_variants(image):
-    try:
-        import cv2
-    except Exception:
-        return [image]
-
-    variants = []
-    base = image
-
-    if base is None:
-        return variants
-
-    enlarged = cv2.resize(base, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    variants.append(enlarged)
-
-    gray = cv2.cvtColor(enlarged, cv2.COLOR_BGR2GRAY) if len(enlarged.shape) == 3 else enlarged
-    variants.append(gray)
-
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(thresh)
-    variants.append(cv2.bitwise_not(thresh))
-
-    adaptive = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        11,
-    )
-    variants.append(adaptive)
-    variants.append(cv2.bitwise_not(adaptive))
-
-    sharpen_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    sharpened = cv2.filter2D(gray, -1, sharpen_kernel)
-    variants.append(sharpened)
-
-    return variants
-
-
-def build_region_candidates(image):
-    try:
-        import cv2
-    except Exception:
-        return [image] if image is not None else []
-
-    if image is None:
-        return []
-
-    height, width = image.shape[:2]
-    crops = []
-    boxes = [
-        (0.12, 0.58, 0.88, 0.94),
-        (0.18, 0.62, 0.84, 0.92),
-        (0.08, 0.50, 0.92, 0.98),
-    ]
-
-    for left, top, right, bottom in boxes:
-        x1 = max(0, int(width * left))
-        y1 = max(0, int(height * top))
-        x2 = min(width, int(width * right))
-        y2 = min(height, int(height * bottom))
-        if x2 - x1 < 40 or y2 - y1 < 20:
-            continue
-        crop = image[y1:y2, x1:x2]
-        crops.append(crop)
-
-    try:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 80, 200)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        scored = []
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            if w < 40 or h < 15:
-                continue
-            ratio = w / max(h, 1)
-            area = w * h
-            if ratio < 1.5 or ratio > 8.5:
-                continue
-            if area < (width * height) * 0.01 or area > (width * height) * 0.20:
-                continue
-            if y < height * 0.35:
-                continue
-            score = area * (1 + min(ratio, 6) / 6)
-            scored.append((score, image[max(0, y - 8):min(height, y + h + 8), max(0, x - 12):min(width, x + w + 12)]))
-
-        scored.sort(key=lambda item: item[0], reverse=True)
-        crops.extend([crop for _, crop in scored[:2]])
-    except Exception:
-        pass
-
-    return crops or [image]
-
-
 def plate_score(candidate):
     if not candidate:
         return 0
@@ -193,102 +96,334 @@ def plate_score(candidate):
     return score
 
 
-def run_tesseract_ocr(image_path, config):
-    command = ['tesseract', str(image_path), 'stdout']
-    if config:
-        command.extend(shlex.split(config))
+STRICT_PLATE_PATTERNS = [
+    re.compile(r'^\d{2}[A-Z]{2}\d{3}$'),
+    re.compile(r'^\d{1,2}[A-Z]{1,3}\d{2,4}$'),
+]
 
+AUTO_ACCEPT_MIN_OCR_SCORE = 0.85
+AUTO_ACCEPT_MIN_DET_SCORE = 0.35
+
+
+def is_strict_plate(value):
+    return any(pattern.fullmatch(value) for pattern in STRICT_PLATE_PATTERNS)
+
+
+def format_plate_display(value):
+    if re.fullmatch(r'\d{2}[A-Z]{2}\d{3}', value):
+        return f'{value[:2]} {value[2:4]} {value[4:]}'
+    if re.fullmatch(r'\d{1,2}[A-Z]{1,3}\d{2,4}', value):
+        match = re.fullmatch(r'(\d{1,2})([A-Z]{1,3})(\d{2,4})', value)
+        if match:
+            return f'{match.group(1)} {match.group(2)} {match.group(3)}'
+    return value
+
+
+@lru_cache(maxsize=1)
+def load_paddle_ocr():
     try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True)
-    except FileNotFoundError:
-        raise RuntimeError(
-            "tesseract tapilmadi. OCR ucun tesseract qurasdirin, meselen: brew install tesseract"
-        )
+        from paddleocr import PaddleOCR
+    except Exception as error:
+        raise RuntimeError(f'PaddleOCR import failed: {error}')
 
-    if completed.returncode not in (0, 1):
-        stderr = (completed.stderr or completed.stdout or '').strip()
-        raise RuntimeError(stderr or f'tesseract exited with code {completed.returncode}')
-
-    return completed.stdout or ''
+    lang = os.environ.get('VEHICLE_OCR_LANG', 'en').strip() or 'en'
+    return PaddleOCR(lang=lang, show_log=False)
 
 
-def get_ocr_configs():
-    default = os.environ.get(
-        "VEHICLE_OCR_CONFIG",
-        "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
+def run_paddle_ocr(image):
+    ocr = load_paddle_ocr()
+
+    if hasattr(ocr, 'ocr'):
+        return ocr.ocr(image, cls=True)
+
+    if hasattr(ocr, 'predict'):
+        return ocr.predict(image)
+
+    raise RuntimeError('PaddleOCR API is not supported by the installed version.')
+
+
+def iter_ocr_lines(result):
+    if not result:
+        return []
+
+    if isinstance(result, list) and len(result) == 1 and isinstance(result[0], list):
+        items = result[0]
+    elif isinstance(result, list):
+        items = result
+    else:
+        items = [result]
+
+    lines = []
+    for item in items:
+        text = ''
+        confidence = None
+
+        if isinstance(item, dict):
+            text = str(item.get('text') or item.get('transcription') or '').strip()
+            confidence = item.get('score') or item.get('confidence')
+        elif isinstance(item, (list, tuple)):
+            if len(item) >= 2 and isinstance(item[1], (list, tuple)):
+                text = str(item[1][0] or '').strip()
+                confidence = item[1][1] if len(item[1]) > 1 else None
+            elif len(item) >= 2 and isinstance(item[1], str):
+                text = str(item[1] or '').strip()
+                confidence = item[2] if len(item) > 2 else None
+            elif item and isinstance(item[0], str):
+                text = str(item[0]).strip()
+                confidence = item[1] if len(item) > 1 else None
+
+        if text:
+            try:
+                confidence_value = float(confidence) if confidence is not None else 0.0
+            except (TypeError, ValueError):
+                confidence_value = 0.0
+
+            lines.append({'text': text, 'confidence': confidence_value})
+
+    return lines
+
+
+def preprocess_plate_image(image):
+    try:
+        import cv2
+    except Exception:
+        return image
+
+    if image is None:
+        return None
+
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    enlarged = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    blurred = cv2.GaussianBlur(enlarged, (3, 3), 0)
+    return blurred
+
+
+def build_paddle_variants(image):
+    try:
+        import cv2
+    except Exception:
+        return [image] if image is not None else []
+
+    if image is None:
+        return []
+
+    base = preprocess_plate_image(image)
+    if base is None:
+        return []
+
+    variants = [base]
+
+    _, otsu = cv2.threshold(base, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(otsu)
+    variants.append(cv2.bitwise_not(otsu))
+
+    adaptive = cv2.adaptiveThreshold(
+        base,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        11,
     )
-    configs = [
-        default,
-        "--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
+    variants.append(adaptive)
+    variants.append(cv2.bitwise_not(adaptive))
+
+    sharpen_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    sharpened = cv2.filter2D(base, -1, sharpen_kernel)
+    variants.append(sharpened)
+
+    return variants
+
+
+def build_heuristic_regions(image):
+    try:
+        import cv2
+    except Exception:
+        return [('full', image)] if image is not None else []
+
+    if image is None:
+        return []
+
+    height, width = image.shape[:2]
+    regions = [('full', image)]
+    boxes = [
+        ('lower_center', (0.12, 0.58, 0.88, 0.94)),
+        ('lower_wide', (0.08, 0.50, 0.92, 0.98)),
+        ('lower_mid', (0.18, 0.62, 0.84, 0.92)),
     ]
 
-    seen = set()
-    unique = []
-    for config in configs:
-        normalized = " ".join(shlex.split(config))
-        if normalized in seen:
+    for label, (left, top, right, bottom) in boxes:
+        x1 = max(0, int(width * left))
+        y1 = max(0, int(height * top))
+        x2 = min(width, int(width * right))
+        y2 = min(height, int(height * bottom))
+        if x2 - x1 < 40 or y2 - y1 < 20:
             continue
-        seen.add(normalized)
-        unique.append(normalized)
+        regions.append((label, image[y1:y2, x1:x2]))
 
-    return unique
+    return regions
 
+
+def compute_candidate_score(text_score, detector_score, plate):
+    score = (text_score or 0.0) * 100.0
+    if detector_score is not None:
+        score += max(0.0, min(1.0, detector_score)) * 35.0
+    score += plate_score(plate)
+    if is_strict_plate(plate):
+        score += 100.0
+    if len(plate) < 6:
+        score -= 1000.0
+    return score
+
+
+def extract_candidates(ocr_lines, detector_score, source_label, region_label):
+    candidates = []
+    for line in ocr_lines:
+        text = str(line.get('text') or '').strip()
+        if not text:
+            continue
+
+        plate = normalize_plate_candidate(text)
+        if not plate or not is_strict_plate(plate):
+            continue
+
+        text_score = float(line.get('confidence') or 0.0)
+        candidate = {
+            'plate': plate,
+            'displayPlate': format_plate_display(plate),
+            'text': text,
+            'confidence': round(text_score, 4),
+            'score': round(compute_candidate_score(text_score, detector_score, plate), 2),
+            'source': source_label,
+            'region': region_label,
+        }
+        candidates.append(candidate)
+
+    return candidates
+
+
+def detect_plate_region(image_path, image):
+    model_path = os.environ.get('VEHICLE_YOLO_MODEL', '').strip()
+    if not model_path:
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': 'YOLO modeli qurulmadi',
+            'configured': False,
+        }
+
+    try:
+        from ultralytics import YOLO
+    except Exception as error:
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': f'YOLO import failed: {error}',
+            'configured': True,
+        }
+
+    model_file = Path(model_path)
+    if not model_file.exists():
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': f'YOLO modeli tapilmadi: {model_file}',
+            'configured': True,
+        }
+
+    try:
+        model = YOLO(str(model_file))
+        conf = float(os.environ.get('VEHICLE_YOLO_CONF', '0.25'))
+        source = image if image is not None else str(image_path)
+        results = model.predict(source=source, verbose=False, conf=conf)
+    except Exception as error:
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': f'YOLO inference failed: {error}',
+            'configured': True,
+        }
+
+    if not results or results[0].boxes is None or len(results[0].boxes) == 0:
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': 'Nömrə üçün YOLO deteksiyası tapilmadi',
+            'configured': True,
+        }
+
+    boxes = results[0].boxes
+    best_idx = int(boxes.conf.argmax().item())
+    box = boxes[best_idx]
+    xyxy = box.xyxy[0].tolist()
+    x1, y1, x2, y2 = [int(v) for v in xyxy]
+    pad_x = max(8, int((x2 - x1) * 0.12))
+    pad_y = max(6, int((y2 - y1) * 0.25))
+    x1 = max(0, x1 - pad_x)
+    y1 = max(0, y1 - pad_y)
+    x2 = min(image.shape[1], x2 + pad_x)
+    y2 = min(image.shape[0], y2 + pad_y)
+    crop = image[y1:y2, x1:x2] if image is not None and y2 > y1 and x2 > x1 else image
+
+    return {
+        'bbox': [x1, y1, x2, y2],
+        'confidence': float(box.conf[0].item()),
+        'crop': crop,
+        'source': 'yolo',
+        'reason': None,
+        'configured': True,
+    }
 
 def run_multi_pass_ocr(image_path, image, cv2_module):
     candidates = []
-    temp_paths = []
 
-    try:
-        if cv2_module is not None and image is not None:
-            baseline_variants = build_ocr_variants(image)[:2]
-            for variant_index, variant in enumerate(baseline_variants):
-                suffix = f'.ocr-base-{variant_index}.png'
-                temp_path = image_path.with_suffix(suffix)
-                temp_paths.append(temp_path)
-                cv2_module.imwrite(str(temp_path), variant)
-                for config in get_ocr_configs():
-                    text = run_tesseract_ocr(temp_path, config)
-                    plate = clean_plate(text)
-                    if plate:
-                        candidates.append((plate_score(plate), plate, text.strip(), config))
+    if image is None:
+        return None
 
-            region_candidates = build_region_candidates(image)
-            for region_index, region in enumerate(region_candidates):
-                for variant_index, variant in enumerate(build_ocr_variants(region)[:3]):
-                    suffix = f'.ocr-{region_index}-{variant_index}.png'
-                    temp_path = image_path.with_suffix(suffix)
-                    temp_paths.append(temp_path)
-                    cv2_module.imwrite(str(temp_path), variant)
-                    for config in get_ocr_configs():
-                        text = run_tesseract_ocr(temp_path, config)
-                        plate = clean_plate(text)
-                        if plate:
-                            candidates.append((plate_score(plate), plate, text.strip(), config))
-        else:
-            for config in get_ocr_configs():
-                text = run_tesseract_ocr(image_path, config)
-                plate = clean_plate(text)
-                if plate:
-                    candidates.append((plate_score(plate), plate, text.strip(), config))
-    finally:
-        for temp_path in temp_paths:
-            if temp_path.exists():
-                temp_path.unlink()
+    regions = [("full", image)]
+    if image is not None:
+        regions.extend(build_heuristic_regions(image)[1:])
+
+    for region_label, region in regions:
+        if region is None:
+            continue
+
+        for variant_index, variant in enumerate(build_paddle_variants(region)):
+            try:
+                ocr_result = run_paddle_ocr(variant)
+            except Exception:
+                continue
+
+            lines = iter_ocr_lines(ocr_result)
+            candidates.extend(extract_candidates(lines, None, f'paddle:{region_label}', f'{region_label}:{variant_index}'))
 
     if not candidates:
         return None
 
-    candidates.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
-    best_score, best_plate, best_text, best_config = candidates[0]
+    candidates.sort(key=lambda item: (item['score'], item['confidence'], len(item['plate'])), reverse=True)
+    best = candidates[0]
     return {
-        "plate": best_plate,
-        "text": best_text,
-        "score": best_score,
-        "config": best_config,
-        "candidates": [
-            {"plate": plate, "text": text, "score": score, "config": config}
-            for score, plate, text, config in candidates[:5]
-        ],
+        'plate': best['plate'],
+        'displayPlate': best['displayPlate'],
+        'text': best['text'],
+        'score': best['score'],
+        'confidence': best['confidence'],
+        'source': best['source'],
+        'candidates': candidates[:5],
     }
 
 
@@ -315,54 +450,66 @@ def main():
             if image is None:
                 return fail(f"Unable to read image: {image_path}")
 
-        bbox = None
-        score = None
-        crop = image
-        mode = "ocr-only"
+        detector = detect_plate_region(image_path, image)
+        crop = detector['crop'] if detector else image
+        detector_confidence = detector['confidence'] if detector else None
+        detector_source = 'yolo' if detector and detector.get('bbox') else 'manual-review'
 
-        model_path = os.environ.get("VEHICLE_YOLO_MODEL", "").strip()
-        if model_path:
-            try:
-                from ultralytics import YOLO
+        ocr_result = run_multi_pass_ocr(image_path, crop, cv2)
 
-                model_file = Path(model_path)
-                if model_file.exists():
-                    model = YOLO(str(model_file))
-                    conf = float(os.environ.get("VEHICLE_YOLO_CONF", "0.25"))
-                    results = model.predict(source=image if image is not None else str(image_path), verbose=False, conf=conf)
-
-                    if results and results[0].boxes is not None and len(results[0].boxes) > 0:
-                        boxes = results[0].boxes
-                        best_idx = int(boxes.conf.argmax().item())
-                        box = boxes[best_idx]
-                        xyxy = box.xyxy[0].tolist()
-                        x1, y1, x2, y2 = [int(v) for v in xyxy]
-                        pad_x = max(8, int((x2 - x1) * 0.1))
-                        pad_y = max(8, int((y2 - y1) * 0.2))
-                        x1 = max(0, x1 - pad_x)
-                        y1 = max(0, y1 - pad_y)
-                        x2 = min(image.shape[1], x2 + pad_x)
-                        y2 = min(image.shape[0], y2 + pad_y)
-                        bbox = [x1, y1, x2, y2]
-                        score = float(box.conf[0].item())
-                        crop = image[y1:y2, x1:x2] if image is not None and y2 > y1 and x2 > x1 else image
-                        mode = "yolo+ocr"
-                else:
-                    mode = "ocr-only"
-            except Exception:
-                mode = "ocr-only"
-
-        ocr_result = run_multi_pass_ocr(image_path, preprocess_for_ocr(crop) if cv2 is not None and crop is not None else crop, cv2)
         if not ocr_result:
-            return fail("Plate text could not be recognized.", 3)
+            payload = {
+                'status': 'manual_review',
+                'manualReviewRequired': True,
+                'reason': detector.get('reason') if detector else 'Plate text could not be recognized.',
+                'plate': '',
+                'displayPlate': '',
+                'confidence': 0.0,
+                'text': '',
+                'bbox': detector.get('bbox') if detector else None,
+                'source': detector_source,
+                'detectorConfidence': detector_confidence,
+                'candidates': [],
+            }
+            print(json.dumps(payload))
+            return 0
+
+        best_plate = ocr_result['plate']
+        best_display_plate = ocr_result.get('displayPlate') or format_plate_display(best_plate)
+        ocr_confidence = float(ocr_result.get('confidence') or 0.0)
+        detector_ok = detector_confidence is not None and detector_confidence >= AUTO_ACCEPT_MIN_DET_SCORE
+        auto_accept = bool(
+            detector.get('configured', False)
+            and detector.get('bbox')
+            and detector_ok
+            and ocr_confidence >= AUTO_ACCEPT_MIN_OCR_SCORE
+            and best_plate
+        )
+
+        manual_review_required = not auto_accept
+        reason = None
+        if not detector.get('configured', False):
+            reason = 'YOLO modeli qurulmayib'
+            manual_review_required = True
+        elif not detector.get('bbox'):
+            reason = detector.get('reason') or 'Nömrə üçün YOLO deteksiyası tapilmadi'
+        elif not detector_ok:
+            reason = 'YOLO confidence azdir'
+        elif ocr_confidence < AUTO_ACCEPT_MIN_OCR_SCORE:
+            reason = 'PaddleOCR confidence azdir'
 
         payload = {
-            "plate": ocr_result["plate"],
-            "confidence": score if score is not None else 0.0,
-            "text": ocr_result["text"],
-            "bbox": bbox,
-            "source": mode,
-            "candidates": ocr_result["candidates"],
+            'status': 'accepted' if not manual_review_required else 'manual_review',
+            'manualReviewRequired': manual_review_required,
+            'reason': reason,
+            'plate': best_plate,
+            'displayPlate': best_display_plate,
+            'confidence': ocr_confidence,
+            'text': ocr_result['text'],
+            'bbox': detector.get('bbox') if detector else None,
+            'source': 'yolo+paddleocr' if detector.get('bbox') else 'paddleocr-review',
+            'detectorConfidence': detector_confidence,
+            'candidates': ocr_result['candidates'],
         }
         print(json.dumps(payload))
         return 0

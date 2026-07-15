@@ -17,6 +17,9 @@ function DashboardAftoyuma() {
   const [captureImageDataUrl, setCaptureImageDataUrl] = useState('');
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [recognitionBusy, setRecognitionBusy] = useState(false);
+  const [recognitionCandidates, setRecognitionCandidates] = useState([]);
+  const [recognitionReviewRequired, setRecognitionReviewRequired] = useState(false);
+  const [recognitionSource, setRecognitionSource] = useState('manual');
   const [vehicleForm, setVehicleForm] = useState({
     plate: '',
     amount: '',
@@ -81,7 +84,7 @@ function DashboardAftoyuma() {
       await vehicleEventsApi.create({
         plate: vehicleForm.plate,
         direction: 'entry',
-        source: 'manual',
+        source: recognitionReviewRequired ? 'camera-review' : recognitionSource,
         amount: Number(vehicleForm.amount) || 0,
         note: vehicleForm.note,
         createdAt: new Date(
@@ -102,6 +105,10 @@ function DashboardAftoyuma() {
         ay: currentMonthName,
         gun: String(now.getDate()).padStart(2, '0'),
       });
+      setRecognitionCandidates([]);
+      setRecognitionReviewRequired(false);
+      setRecognitionSource('manual');
+      setRecognitionMessage('');
     } catch (error) {
       alert(`Maşın qeydi saxlanmadı: ${error.message}`);
     }
@@ -114,6 +121,9 @@ function DashboardAftoyuma() {
     const dataUrl = await fileToDataUrl(file);
     setCaptureImageDataUrl(dataUrl);
     setRecognitionMessage('');
+    setRecognitionCandidates([]);
+    setRecognitionReviewRequired(false);
+    setRecognitionSource('manual');
   };
 
   const recognizeCapture = async () => {
@@ -124,6 +134,9 @@ function DashboardAftoyuma() {
 
     setRecognitionBusy(true);
     setRecognitionMessage('Şəkil oxunur...');
+    setRecognitionCandidates([]);
+    setRecognitionReviewRequired(false);
+    setRecognitionSource('manual');
 
     try {
       const result = await vehicleVisionApi.recognize({
@@ -133,17 +146,31 @@ function DashboardAftoyuma() {
         save: false,
       });
 
-      const plate = String(result?.event?.plate || '').trim();
-      const confidence = result?.vision?.confidence ?? result?.event?.confidence ?? null;
+      const plate = String(result?.plate || result?.displayPlate || result?.event?.plate || '').trim();
+      const confidence = result?.confidence ?? result?.vision?.confidence ?? result?.event?.confidence ?? null;
+      const reviewRequired = Boolean(result?.reviewRequired ?? result?.vision?.manualReviewRequired);
+      const candidates = Array.isArray(result?.candidates) ? result.candidates : Array.isArray(result?.vision?.candidates) ? result.vision.candidates : [];
+
+      setRecognitionCandidates(candidates);
+      setRecognitionReviewRequired(reviewRequired);
+      setRecognitionSource(reviewRequired ? 'camera-review' : 'camera-auto');
 
       if (plate) {
         setVehicleForm((prev) => ({ ...prev, plate }));
-        setRecognitionMessage(`Oxundu: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`);
+        if (reviewRequired) {
+          setRecognitionMessage(
+            `Təsdiq tələb olunur: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`,
+          );
+        } else {
+          setRecognitionMessage(`Oxundu: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`);
+        }
       } else {
-        setRecognitionMessage('Nömrə oxunmadı.');
+        setRecognitionMessage(reviewRequired ? 'Təsdiq tələb olunur, amma namizəd tapılmadı.' : 'Nömrə oxunmadı.');
       }
     } catch (error) {
       setRecognitionMessage(error.message || 'Şəkil oxunmadı.');
+      setRecognitionCandidates([]);
+      setRecognitionReviewRequired(false);
     } finally {
       setRecognitionBusy(false);
     }
@@ -253,13 +280,37 @@ function DashboardAftoyuma() {
               {recognitionBusy ? 'Oxunur...' : 'YOLO + OCR ilə oxu'}
             </button>
             {recognitionMessage ? <div style={cameraNote}>{recognitionMessage}</div> : null}
+            {recognitionCandidates.length ? (
+              <div style={candidateWrap}>
+                {recognitionCandidates.map((candidate) => (
+                  <button
+                    key={`${candidate.plate}-${candidate.region}-${candidate.source}`}
+                    type="button"
+                    style={candidateButton}
+                    onClick={() => {
+                      setVehicleForm((prev) => ({ ...prev, plate: candidate.displayPlate || candidate.plate }));
+                      setRecognitionSource('camera-review');
+                      setRecognitionReviewRequired(true);
+                      setRecognitionMessage(`Seçildi: ${candidate.displayPlate || candidate.plate}`);
+                    }}
+                  >
+                    <span style={candidatePlate}>{candidate.displayPlate || candidate.plate}</span>
+                    <span style={candidateMeta}>{Number(candidate.confidence || 0).toFixed(2)}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div style={vehicleFormWrap}>
             <Field label="Maşın nömrəsi">
               <input
                 value={vehicleForm.plate}
-                onChange={(e) => setVehicleForm((prev) => ({ ...prev, plate: e.target.value }))}
+                onChange={(e) => {
+                  setVehicleForm((prev) => ({ ...prev, plate: e.target.value }));
+                  setRecognitionSource('manual');
+                  setRecognitionReviewRequired(false);
+                }}
                 placeholder="xx-xx-xxx"
                 style={controlStyle}
               />
@@ -285,7 +336,7 @@ function DashboardAftoyuma() {
           </div>
 
           <button type="button" style={buttonStyle} onClick={saveVehicle}>
-            Saxla
+            {recognitionReviewRequired ? 'Təsdiq et və Saxla' : 'Saxla'}
           </button>
         </div>
 
@@ -411,6 +462,24 @@ const cameraButton = {
   width: 'fit-content',
 };
 const cameraNote = { fontSize: '12px', color: theme.colors.muted, fontWeight: 700 };
+const candidateWrap = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '8px',
+};
+const candidateButton = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '10px',
+  padding: '8px 10px',
+  borderRadius: '999px',
+  border: `1px solid ${theme.colors.border}`,
+  background: 'linear-gradient(180deg, #ffffff, #faf7f2)',
+  cursor: 'pointer',
+  boxShadow: '0 8px 18px rgba(15, 23, 42, 0.05)',
+};
+const candidatePlate = { fontSize: '13px', fontWeight: 800, color: theme.colors.text };
+const candidateMeta = { fontSize: '11px', fontWeight: 800, color: theme.colors.muted };
 const vehicleFormWrap = { display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' };
 const buttonStyle = { padding: '12px 14px', borderRadius: '10px', border: 'none', background: theme.colors.primary, color: '#fff', fontWeight: 800, cursor: 'pointer', width: 'fit-content' };
 export default DashboardAftoyuma;

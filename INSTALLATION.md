@@ -57,8 +57,8 @@ cd Anar
 docker compose up -d --build
 ```
 
-Əgər yol oxuma / OCR hissəsi işləyirsə, `tesseract-ocr` image-in içində artıq olur.
-YOLO modeli verməsən belə, ən son kodda skript OCR-only rejimə düşür.
+Bu versiyada avtomatik oxuma üçün `YOLO` detector + `PaddleOCR` istifadə olunur.
+`VEHICLE_YOLO_MODEL` boşdursa, sistem plate-i auto-saxlamır və manual review təklif edir.
 
 ## 6. Yoxlama
 
@@ -129,7 +129,7 @@ git pull
 docker compose up -d --build
 ```
 
-Əgər maşın nömrəsi tanınmırsa, serverdə `tesseract-ocr` və layihənin son `server/vehicle-vision.py` faylı aktiv olmalıdır.
+Əgər maşın nömrəsi tanınmırsa, serverdə `VEHICLE_YOLO_MODEL` düzgün model faylına yönəlməli və son `server/vehicle-vision.py` istifadə olunmalıdır.
 
 ## Qeyd
 
