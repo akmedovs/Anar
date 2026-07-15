@@ -119,6 +119,46 @@ def format_plate_display(value):
     return value
 
 
+def _cpu_flags():
+    try:
+        with open('/proc/cpuinfo', 'r', encoding='utf-8', errors='ignore') as handle:
+            for line in handle:
+                if line.lower().startswith('flags'):
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        return set(parts[1].strip().split())
+    except Exception:
+        return set()
+    return set()
+
+
+@lru_cache(maxsize=1)
+def paddle_runtime_available():
+    if os.environ.get('VEHICLE_ALLOW_UNSAFE_PADDLE', '').strip() == '1':
+        return True
+    flags = _cpu_flags()
+    # Current server image lacks avx2, which is where the installed Paddle wheel
+    # has been crashing with illegal instruction during import.
+    return 'avx2' in flags
+
+
+@lru_cache(maxsize=1)
+def selected_ocr_backend():
+    requested = os.environ.get('VEHICLE_OCR_BACKEND', 'auto').strip().lower()
+    if requested in {'paddle', 'tesseract'}:
+        if requested == 'paddle' and not paddle_runtime_available():
+            return 'tesseract'
+        return requested
+    return 'paddle' if paddle_runtime_available() else 'tesseract'
+
+
+def tesseract_language():
+    value = os.environ.get('VEHICLE_OCR_LANG', 'eng').strip().lower() or 'eng'
+    if value == 'en':
+        return 'eng'
+    return value
+
+
 @lru_cache(maxsize=1)
 def load_paddle_ocr():
     try:
@@ -127,7 +167,12 @@ def load_paddle_ocr():
         raise RuntimeError(f'PaddleOCR import failed: {error}')
 
     lang = os.environ.get('VEHICLE_OCR_LANG', 'en').strip() or 'en'
-    return PaddleOCR(lang=lang, show_log=False)
+    return PaddleOCR(
+        lang=lang,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+    )
 
 
 def run_paddle_ocr(image):
@@ -140,6 +185,74 @@ def run_paddle_ocr(image):
         return ocr.predict(image)
 
     raise RuntimeError('PaddleOCR API is not supported by the installed version.')
+
+
+def run_tesseract_ocr(image):
+    try:
+        import pytesseract
+    except Exception as error:
+        raise RuntimeError(f'Tesseract import failed: {error}')
+
+    lang = tesseract_language()
+    config = os.environ.get('VEHICLE_TESSERACT_CONFIG', '--psm 7 --oem 3').strip() or '--psm 7 --oem 3'
+
+    data = None
+    try:
+        data = pytesseract.image_to_data(
+            image,
+            output_type=pytesseract.Output.DICT,
+            lang=lang,
+            config=config,
+        )
+    except Exception:
+        data = None
+
+    lines = []
+    if data and data.get('text'):
+        grouped = {}
+        count = len(data.get('text', []))
+        for index in range(count):
+            text = str(data['text'][index] or '').strip()
+            if not text:
+                continue
+
+            conf_raw = data.get('conf', ['-1'])[index]
+            try:
+                conf_value = float(conf_raw)
+            except (TypeError, ValueError):
+                conf_value = -1.0
+            if conf_value < 0:
+                continue
+
+            if conf_value > 1.0:
+                conf_value /= 100.0
+
+            key = (
+                data.get('block_num', [0])[index],
+                data.get('par_num', [0])[index],
+                data.get('line_num', [0])[index],
+            )
+            grouped.setdefault(key, []).append((text, conf_value))
+
+        for words in grouped.values():
+            if not words:
+                continue
+            joined_text = ' '.join(word for word, _ in words).strip()
+            confidence = sum(score for _, score in words) / len(words)
+            if joined_text:
+                lines.append({'text': joined_text, 'confidence': confidence})
+
+    if not lines:
+        try:
+            raw_text = pytesseract.image_to_string(image, lang=lang, config=config)
+        except Exception as error:
+            raise RuntimeError(f'Tesseract OCR failed: {error}')
+
+        raw_text = str(raw_text or '').strip()
+        if raw_text:
+            lines.append({'text': raw_text, 'confidence': 0.35})
+
+    return lines
 
 
 def iter_ocr_lines(result):
@@ -173,14 +286,23 @@ def iter_ocr_lines(result):
                 confidence = item[1] if len(item) > 1 else None
 
         if text:
-            try:
-                confidence_value = float(confidence) if confidence is not None else 0.0
-            except (TypeError, ValueError):
-                confidence_value = 0.0
+            confidence_value = normalize_confidence(confidence)
 
             lines.append({'text': text, 'confidence': confidence_value})
 
     return lines
+
+
+def normalize_confidence(value):
+    try:
+        confidence_value = float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
+        confidence_value = 0.0
+
+    if confidence_value > 1.0:
+        confidence_value /= 100.0
+
+    return max(0.0, min(1.0, confidence_value))
 
 
 def preprocess_plate_image(image):
@@ -202,7 +324,7 @@ def preprocess_plate_image(image):
     return blurred
 
 
-def build_paddle_variants(image):
+def build_ocr_variants(image):
     try:
         import cv2
     except Exception:
@@ -394,6 +516,8 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
     if image is None:
         return None
 
+    backend = selected_ocr_backend()
+
     regions = [("full", image)]
     if image is not None:
         regions.extend(build_heuristic_regions(image)[1:])
@@ -402,14 +526,17 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         if region is None:
             continue
 
-        for variant_index, variant in enumerate(build_paddle_variants(region)):
+        for variant_index, variant in enumerate(build_ocr_variants(region)):
             try:
-                ocr_result = run_paddle_ocr(variant)
+                if backend == 'paddle':
+                    ocr_result = run_paddle_ocr(variant)
+                else:
+                    ocr_result = run_tesseract_ocr(variant)
             except Exception:
                 continue
 
             lines = iter_ocr_lines(ocr_result)
-            candidates.extend(extract_candidates(lines, None, f'paddle:{region_label}', f'{region_label}:{variant_index}'))
+            candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}'))
 
     if not candidates:
         return None
@@ -423,6 +550,7 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         'score': best['score'],
         'confidence': best['confidence'],
         'source': best['source'],
+        'backend': backend,
         'candidates': candidates[:5],
     }
 
@@ -468,6 +596,7 @@ def main():
                 'text': '',
                 'bbox': detector.get('bbox') if detector else None,
                 'source': detector_source,
+                'ocrBackend': selected_ocr_backend(),
                 'detectorConfidence': detector_confidence,
                 'candidates': [],
             }
@@ -507,7 +636,8 @@ def main():
             'confidence': ocr_confidence,
             'text': ocr_result['text'],
             'bbox': detector.get('bbox') if detector else None,
-            'source': 'yolo+paddleocr' if detector.get('bbox') else 'paddleocr-review',
+            'source': f"yolo+{ocr_result.get('backend') or selected_ocr_backend()}" if detector.get('bbox') else f"{ocr_result.get('backend') or selected_ocr_backend()}-review",
+            'ocrBackend': ocr_result.get('backend') or selected_ocr_backend(),
             'detectorConfidence': detector_confidence,
             'candidates': ocr_result['candidates'],
         }

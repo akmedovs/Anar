@@ -57,7 +57,8 @@ cd Anar
 docker compose up -d --build
 ```
 
-Bu versiyada avtomatik oxuma üçün `YOLO` detector + `PaddleOCR` istifadə olunur.
+Bu versiyada avtomatik oxuma üçün `YOLO` detector + OCR + strict regex + manual confirm flow istifadə olunur.
+`VEHICLE_OCR_BACKEND=auto` olduqda server əvvəlcə Paddle uyğunluğunu yoxlayır, uyğun deyilsə Tesseract fallback işləyir.
 `VEHICLE_YOLO_MODEL` boşdursa, sistem plate-i auto-saxlamır və manual review təklif edir.
 
 ## 6. Yoxlama
