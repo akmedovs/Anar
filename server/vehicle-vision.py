@@ -404,6 +404,14 @@ def build_heuristic_regions(image):
     return regions
 
 
+def heuristic_plate_crop(image):
+    regions = build_heuristic_regions(image)
+    for label, region in regions:
+        if label == 'lower_center' and region is not None:
+            return region
+    return image
+
+
 def compute_candidate_score(text_score, detector_score, plate):
     score = (text_score or 0.0) * 100.0
     if detector_score is not None:
@@ -455,9 +463,9 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': image,
+            'crop': heuristic_plate_crop(image),
             'source': 'manual-review',
-            'reason': 'YOLO modeli qurulmadi',
+            'reason': 'YOLO modeli qurulmadi, heuristic crop isledildi',
             'configured': False,
         }
 
@@ -493,7 +501,7 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': image,
+            'crop': heuristic_plate_crop(image),
             'source': 'manual-review',
             'reason': f'YOLO inference failed: {error}',
             'configured': True,
@@ -503,9 +511,9 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': image,
+            'crop': heuristic_plate_crop(image),
             'source': 'manual-review',
-            'reason': 'Nömrə üçün YOLO deteksiyası tapilmadi',
+            'reason': 'Nömrə üçün YOLO deteksiyası tapilmadi, heuristic crop isledildi',
             'configured': True,
         }
 
