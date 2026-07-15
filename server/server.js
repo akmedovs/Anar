@@ -460,6 +460,8 @@ async function saveCaptureImage(imageDataUrl) {
 }
 
 function runVisionScript(imagePath) {
+  const timeoutMs = Number(process.env.VEHICLE_VISION_TIMEOUT_MS || 300000) || 300000;
+
   return new Promise((resolve, reject) => {
     const child = execFile(
       visionCommand,
@@ -469,16 +471,21 @@ function runVisionScript(imagePath) {
         ...process.env,
         VEHICLE_YOLO_MODEL: visionModel,
       },
-        timeout: 120000,
+        timeout: timeoutMs,
         maxBuffer: 1024 * 1024,
       },
       (error, stdout, stderr) => {
         if (error) {
-          const message = stderr?.toString().trim() || error.message;
+          const stderrText = String(stderr || '').trim();
+          const timedOut = Boolean(error.killed) || /timed out/i.test(error.message || '');
+          const message = timedOut
+            ? `Vision script timeout after ${timeoutMs}ms.`
+            : (stderrText || error.message);
           console.error('[vehicle-vision] script failed', {
             imagePath,
             message,
-            stderr: String(stderr || '').trim(),
+            stderr: stderrText,
+            timeoutMs,
           });
           reject(new Error(message));
           return;
