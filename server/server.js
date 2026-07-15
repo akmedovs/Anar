@@ -477,19 +477,37 @@ function runVisionScript(imagePath) {
       (error, stdout, stderr) => {
         if (error) {
           const message = stderr?.toString().trim() || error.message;
+          console.error('[vehicle-vision] script failed', {
+            imagePath,
+            message,
+            stderr: String(stderr || '').trim(),
+          });
           reject(new Error(message));
           return;
         }
 
         const output = String(stdout || '').trim();
         if (!output) {
+          console.error('[vehicle-vision] script returned empty output', { imagePath });
           reject(new Error('Vision script boş cavab qaytardı.'));
           return;
         }
 
         try {
-          resolve(JSON.parse(output));
+          const parsed = JSON.parse(output);
+          console.log('[vehicle-vision] script result', {
+            imagePath,
+            plate: parsed?.plate,
+            source: parsed?.source,
+            confidence: parsed?.confidence,
+            topCandidates: Array.isArray(parsed?.candidates) ? parsed.candidates.slice(0, 3) : [],
+          });
+          resolve(parsed);
         } catch {
+          console.error('[vehicle-vision] script returned invalid json', {
+            imagePath,
+            output: output.slice(0, 200),
+          });
           reject(new Error(`Vision script JSON qaytarmadı: ${output.slice(0, 200)}`));
         }
       },
@@ -521,6 +539,13 @@ async function recognizeVehicleCapture(input) {
   }
 
   const capture = await saveCaptureImage(imageDataUrl);
+  console.log('[vehicle-vision] recognize request', {
+    captureUrl: capture.publicPath,
+    direction,
+    source,
+    createdAt: createdAt || null,
+    imageBytes: imageDataUrl.length,
+  });
   const visionResult = await runVisionScript(capture.absPath);
   const plate = normalizePlate(visionResult?.plate || visionResult?.text || '');
   const confidence = visionResult?.confidence === undefined || visionResult?.confidence === null || visionResult?.confidence === ''
@@ -528,6 +553,10 @@ async function recognizeVehicleCapture(input) {
     : toNumber(visionResult.confidence);
 
   if (!plate) {
+    console.error('[vehicle-vision] plate rejected', {
+      captureUrl: capture.publicPath,
+      visionResult,
+    });
     const error = new Error('Nömrə oxunmadı.');
     error.statusCode = 422;
     error.details = visionResult;
