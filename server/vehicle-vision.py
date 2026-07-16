@@ -18,12 +18,18 @@ def clean_plate(raw):
     return normalize_plate_candidate(raw)
 
 
-def normalize_plate_candidate(raw):
-    value = re.sub(r"[^A-Z0-9-]", "", (raw or "").upper().replace(" ", ""))
+def parse_az_license_plate(ocr_text):
+    value = re.sub(r'[^A-Z0-9]', '', (ocr_text or '').upper())
     if not value:
-        return ""
+        return ''
 
-    translated = value.translate(str.maketrans({
+    digit_to_char = {
+        '0': 'O',
+        '1': 'I',
+        '8': 'B',
+        '5': 'S',
+    }
+    char_to_digit = {
         'O': '0',
         'Q': '0',
         'D': '0',
@@ -34,33 +40,57 @@ def normalize_plate_candidate(raw):
         'B': '8',
         'G': '6',
         'T': '7',
-    }))
+    }
 
-    patterns = [
-        re.compile(r'(\d{2}[A-Z]{2}\d{3})'),
-        re.compile(r'(\d{1,2}[A-Z]{1,3}\d{2,4})'),
-        re.compile(r'([A-Z0-9-]{6,10})'),
-    ]
+    def normalize_window(window):
+        if len(window) != 7:
+            return ''
 
-    for candidate in (translated, value):
-        for pattern in patterns:
-            match = pattern.search(candidate)
-            if not match:
-                continue
+        chars = list(window)
 
-            plate = match.group(1)
-            if len(plate) < 6:
-                continue
-            if not any(ch.isdigit() for ch in plate):
-                continue
-            if not any(ch.isalpha() for ch in plate):
-                continue
-            return plate
+        for index in range(2):
+            if chars[index] in char_to_digit:
+                chars[index] = char_to_digit[chars[index]]
 
-    if len(translated) >= 6 and any(ch.isdigit() for ch in translated) and any(ch.isalpha() for ch in translated):
-        return translated
-    if len(value) >= 6 and any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value):
-        return value
+        for index in range(2, 4):
+            if chars[index] in digit_to_char:
+                chars[index] = digit_to_char[chars[index]]
+
+        for index in range(4, 7):
+            if chars[index] in char_to_digit:
+                chars[index] = char_to_digit[chars[index]]
+
+        candidate = ''.join(chars)
+        if re.fullmatch(r'\d{2}[A-Z]{2}\d{3}', candidate):
+            return candidate
+        return ''
+
+    if len(value) >= 7:
+        for start in range(0, len(value) - 6):
+            candidate = normalize_window(value[start:start + 7])
+            if candidate:
+                return candidate
+
+    if len(value) == 7:
+        candidate = normalize_window(value)
+        if candidate:
+            return candidate
+
+    return ''
+
+
+def normalize_plate_candidate(raw):
+    value = re.sub(r"[^A-Z0-9]", "", (raw or "").upper())
+    if not value:
+        return ""
+
+    exact = re.search(r'(\d{2}[A-Z]{2}\d{3})', value)
+    if exact:
+        return exact.group(1)
+
+    corrected = parse_az_license_plate(value)
+    if corrected:
+        return corrected
 
     return ""
 
@@ -76,6 +106,38 @@ def preprocess_for_ocr(image):
     return gray
 
 
+def preprocess_for_wash(cropped_plate):
+    try:
+        import cv2
+    except Exception:
+        return None
+
+    if cropped_plate is None or getattr(cropped_plate, 'size', 0) == 0:
+        return None
+
+    if len(cropped_plate.shape) == 3:
+        gray = cv2.cvtColor(cropped_plate, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = cropped_plate
+
+    if gray.shape[0] < 20 or gray.shape[1] < 60:
+        return None
+
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    thresh = cv2.threshold(
+        enhanced,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )[1]
+
+    return thresh
+
+
 def plate_score(candidate):
     if not candidate:
         return 0
@@ -83,8 +145,6 @@ def plate_score(candidate):
     score = len(candidate)
     if re.fullmatch(r'\d{2}[A-Z]{2}\d{3}', candidate):
         score += 100
-    elif re.fullmatch(r'\d{1,2}[A-Z]{1,3}\d{2,4}', candidate):
-        score += 60
     elif re.fullmatch(r'[A-Z0-9-]{6,10}', candidate):
         score += 20
 
@@ -100,7 +160,6 @@ def plate_score(candidate):
 
 STRICT_PLATE_PATTERNS = [
     re.compile(r'^\d{2}[A-Z]{2}\d{3}$'),
-    re.compile(r'^\d{1,2}[A-Z]{1,3}\d{2,4}$'),
 ]
 
 AUTO_ACCEPT_MIN_OCR_SCORE = 0.85
@@ -116,10 +175,6 @@ def is_strict_plate(value):
 def format_plate_display(value):
     if re.fullmatch(r'\d{2}[A-Z]{2}\d{3}', value):
         return f'{value[:2]} {value[2:4]} {value[4:]}'
-    if re.fullmatch(r'\d{1,2}[A-Z]{1,3}\d{2,4}', value):
-        match = re.fullmatch(r'(\d{1,2})([A-Z]{1,3})(\d{2,4})', value)
-        if match:
-            return f'{match.group(1)} {match.group(2)} {match.group(3)}'
     return value
 
 
@@ -425,6 +480,10 @@ def build_ocr_variants(image):
 
     variants = [base]
 
+    wash_variant = preprocess_for_wash(image)
+    if wash_variant is not None:
+        variants.append(wash_variant)
+
     _, otsu = cv2.threshold(base, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(otsu)
     variants.append(cv2.bitwise_not(otsu))
@@ -529,7 +588,7 @@ def extract_candidates(ocr_lines, detector_score, source_label, region_label, st
         strict = is_strict_plate(plate)
         if strict_only and not strict:
             continue
-        if not strict_only and (len(plate) < 5 or not any(ch.isdigit() for ch in plate) or not any(ch.isalpha() for ch in plate)):
+        if not strict_only and (len(plate) < 7 or not any(ch.isdigit() for ch in plate) or not any(ch.isalpha() for ch in plate)):
             continue
 
         text_score = float(line.get('confidence') or 0.0)
