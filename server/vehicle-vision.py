@@ -20,7 +20,7 @@ def clean_plate(raw):
 
 def parse_az_license_plate(ocr_text):
     value = re.sub(r'[^A-Z0-9]', '', (ocr_text or '').upper())
-    if not value:
+    if not value or len(value) < 7:
         return ''
 
     digit_to_char = {
@@ -65,14 +65,8 @@ def parse_az_license_plate(ocr_text):
             return candidate
         return ''
 
-    if len(value) >= 7:
-        for start in range(0, len(value) - 6):
-            candidate = normalize_window(value[start:start + 7])
-            if candidate:
-                return candidate
-
-    if len(value) == 7:
-        candidate = normalize_window(value)
+    for start in range(0, len(value) - 6):
+        candidate = normalize_window(value[start:start + 7])
         if candidate:
             return candidate
 
@@ -102,6 +96,11 @@ def preprocess_for_ocr(image):
         return image
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    crop_y = int(h * 0.05)
+    crop_x = int(w * 0.08)
+    if h - crop_y * 2 > 0 and w - crop_x * 2 > 0:
+        gray = gray[crop_y:h - crop_y, crop_x:w - crop_x]
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
     return gray
 
@@ -119,6 +118,12 @@ def preprocess_for_wash(cropped_plate):
         gray = cv2.cvtColor(cropped_plate, cv2.COLOR_BGR2GRAY)
     else:
         gray = cropped_plate
+
+    h, w = gray.shape[:2]
+    crop_y = int(h * 0.05)
+    crop_x = int(w * 0.08)
+    if h - crop_y * 2 > 0 and w - crop_x * 2 > 0:
+        gray = gray[crop_y:h - crop_y, crop_x:w - crop_x]
 
     if gray.shape[0] < 20 or gray.shape[1] < 60:
         return None
@@ -459,6 +464,12 @@ def preprocess_plate_image(image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
         gray = image
+
+    h, w = gray.shape[:2]
+    crop_y = int(h * 0.05)
+    crop_x = int(w * 0.08)
+    if h - crop_y * 2 > 0 and w - crop_x * 2 > 0:
+        gray = gray[crop_y:h - crop_y, crop_x:w - crop_x]
 
     enlarged = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     blurred = cv2.GaussianBlur(enlarged, (3, 3), 0)
