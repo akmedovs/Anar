@@ -120,7 +120,7 @@ function DashboardAftoyuma() {
       } else if (Array.isArray(job.candidates) && job.candidates.length) {
         setRecognitionMessage('Təsdiq tələb olunur. Aşağıdakı namizədlərdən birini seç.');
       } else {
-        setRecognitionMessage('Təsdiq tələb olunur, amma namizəd tapılmadı.');
+        setRecognitionMessage(job.reason ? `Təsdiq tələb olunur: ${job.reason}` : 'Təsdiq tələb olunur, amma namizəd tapılmadı.');
       }
     } else if (job.status === 'approved') {
       setRecognitionMessage(

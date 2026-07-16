@@ -625,9 +625,9 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': heuristic_plate_crop(image),
+            'crop': image,
             'source': 'manual-review',
-            'reason': 'YOLO modeli qurulmadi, heuristic crop isledildi',
+            'reason': 'YOLO modeli qurulmadi, full image OCR isledildi',
             'configured': False,
         }
 
@@ -663,7 +663,7 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': heuristic_plate_crop(image),
+            'crop': image,
             'source': 'manual-review',
             'reason': f'YOLO inference failed: {error}',
             'configured': True,
@@ -673,9 +673,9 @@ def detect_plate_region(image_path, image):
         return {
             'bbox': None,
             'confidence': None,
-            'crop': heuristic_plate_crop(image),
+            'crop': image,
             'source': 'manual-review',
-            'reason': 'Nömrə üçün YOLO deteksiyası tapilmadi, heuristic crop isledildi',
+            'reason': 'Nömrə üçün YOLO deteksiyası tapilmadi, full image OCR isledildi',
             'configured': True,
         }
 
