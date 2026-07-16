@@ -460,7 +460,7 @@ async function saveCaptureImage(imageDataUrl) {
 }
 
 function runVisionScript(imagePath) {
-  const timeoutMs = Number(process.env.VEHICLE_VISION_TIMEOUT_MS || 300000) || 300000;
+  const timeoutMs = Number(process.env.VEHICLE_VISION_TIMEOUT_MS || 120000) || 120000;
 
   return new Promise((resolve, reject) => {
     const child = execFile(
@@ -553,7 +553,24 @@ async function recognizeVehicleCapture(input) {
     createdAt: createdAt || null,
     imageBytes: imageDataUrl.length,
   });
-  const visionResult = await runVisionScript(capture.absPath);
+  let visionResult;
+  try {
+    visionResult = await runVisionScript(capture.absPath);
+  } catch (error) {
+    const timeoutHit = /timeout/i.test(String(error?.message || ''));
+    console.error('[vehicle-vision] falling back to manual review', {
+      captureUrl: capture.publicPath,
+      message: error?.message || String(error),
+      timeoutHit,
+    });
+    visionResult = {
+      status: 'manual_review',
+      manualReviewRequired: true,
+      reason: timeoutHit ? 'OCR timeout' : (error?.message || 'OCR failed'),
+      candidates: [],
+      backendsTried: [],
+    };
+  }
   const reviewRequired = Boolean(visionResult?.manualReviewRequired || visionResult?.status === 'manual_review');
   const plate = normalizePlate(
     visionResult?.plate

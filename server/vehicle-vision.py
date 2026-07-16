@@ -106,7 +106,7 @@ STRICT_PLATE_PATTERNS = [
 AUTO_ACCEPT_MIN_OCR_SCORE = 0.85
 AUTO_ACCEPT_MIN_DET_SCORE = 0.35
 
-OCR_BACKEND_PRIORITY = ('paddle', 'tesseract')
+OCR_BACKEND_PRIORITY = ('tesseract', 'paddle')
 
 
 def is_strict_plate(value):
@@ -174,9 +174,6 @@ def tesseract_configs():
     base_flags = [
         '--oem 3 --psm 7',
         '--oem 3 --psm 6',
-        '--oem 3 --psm 8',
-        '--oem 3 --psm 11',
-        '--oem 3 --psm 13',
     ]
     if whitelist:
         return [f'{flags} -c tessedit_char_whitelist={whitelist}' for flags in base_flags]
@@ -642,17 +639,18 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         return None
 
     backends = ocr_backend_order()
-
     regions = [("full", image)]
-    if image is not None:
-        regions.extend(build_heuristic_regions(image)[1:])
+    if image is not None and image.shape[1] > image.shape[0]:
+        regions.append(("lower_center", heuristic_plate_crop(image)))
+    regions = [(label, region) for label, region in regions if region is not None]
 
     for backend in backends:
         for region_label, region in regions:
             if region is None:
                 continue
 
-            for variant_index, variant in enumerate(build_ocr_variants(region)):
+            variants = build_ocr_variants(region)[:3]
+            for variant_index, variant in enumerate(variants):
                 if backend == 'paddle':
                     try:
                         ocr_result = run_backend_ocr(backend, variant, image_path, cv2_module)
