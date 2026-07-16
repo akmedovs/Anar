@@ -22,8 +22,40 @@ CREATE TABLE IF NOT EXISTS vehicle_events (
   source TEXT NOT NULL DEFAULT 'manual',
   confidence NUMERIC(5, 4),
   image_url TEXT NOT NULL DEFAULT '',
+  recognition_job_public_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE IF EXISTS vehicle_events
+  ADD COLUMN IF NOT EXISTS recognition_job_public_id TEXT;
+
+CREATE TABLE IF NOT EXISTS recognition_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  public_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'processing', 'manual_review', 'approved', 'failed')),
+  source TEXT NOT NULL DEFAULT 'camera',
+  direction TEXT NOT NULL DEFAULT 'entry' CHECK (direction IN ('entry', 'exit')),
+  capture_url TEXT NOT NULL DEFAULT '',
+  image_path TEXT NOT NULL DEFAULT '',
+  input JSONB NOT NULL DEFAULT '{}'::jsonb,
+  plate TEXT NOT NULL DEFAULT '',
+  display_plate TEXT NOT NULL DEFAULT '',
+  confidence NUMERIC(5, 4),
+  reason TEXT NOT NULL DEFAULT '',
+  bbox JSONB,
+  candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
+  vision JSONB NOT NULL DEFAULT '{}'::jsonb,
+  detector_confidence NUMERIC(5, 4),
+  ocr_backend TEXT NOT NULL DEFAULT '',
+  manual_review_required BOOLEAN NOT NULL DEFAULT true,
+  vehicle_event_id INTEGER REFERENCES vehicle_events(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ
+);
+
+ALTER TABLE IF EXISTS recognition_jobs
+  ADD COLUMN IF NOT EXISTS input JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS wash_expenses (
   id SERIAL PRIMARY KEY,

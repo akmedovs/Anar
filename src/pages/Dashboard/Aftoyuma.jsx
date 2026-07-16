@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { reportsApi, vehicleEventsApi, vehicleVisionApi, washWaterApi } from '../../api/reports';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { recognitionJobsApi, reportsApi, vehicleEventsApi, vehicleVisionApi, washWaterApi } from '../../api/reports';
 import { aylar, cariIl, formatMoney, getYearOptions, toAmount } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -20,6 +20,10 @@ function DashboardAftoyuma() {
   const [recognitionCandidates, setRecognitionCandidates] = useState([]);
   const [recognitionReviewRequired, setRecognitionReviewRequired] = useState(false);
   const [recognitionSource, setRecognitionSource] = useState('manual');
+  const [recognitionJobId, setRecognitionJobId] = useState('');
+  const [recognitionSnapshot, setRecognitionSnapshot] = useState(null);
+  const [capturePreviewSize, setCapturePreviewSize] = useState({ width: 0, height: 0 });
+  const recognitionStreamRef = useRef(null);
   const [vehicleForm, setVehicleForm] = useState({
     plate: '',
     amount: '',
@@ -55,6 +59,15 @@ function DashboardAftoyuma() {
       window.clearInterval(timer);
     };
   }, [currentYear]);
+
+  useEffect(() => {
+    return () => {
+      if (recognitionStreamRef.current) {
+        recognitionStreamRef.current.close();
+        recognitionStreamRef.current = null;
+      }
+    };
+  }, []);
   const currentMonthElectricRows = useMemo(
     () =>
       reports.filter(
@@ -74,6 +87,50 @@ function DashboardAftoyuma() {
   const waterTotal = currentMonthWaterRows.reduce((sum, item) => sum + toAmount(item.total), 0);
   const communalTotal = electricTotal + waterTotal;
 
+  const closeRecognitionStream = () => {
+    if (recognitionStreamRef.current) {
+      recognitionStreamRef.current.close();
+      recognitionStreamRef.current = null;
+    }
+  };
+
+  const applyRecognitionJob = (job) => {
+    if (!job) return;
+
+    setRecognitionSnapshot(job);
+    setRecognitionCandidates(Array.isArray(job.candidates) ? job.candidates : []);
+
+    const reviewRequired = Boolean(job.manualReviewRequired || job.status === 'manual_review');
+    setRecognitionReviewRequired(reviewRequired);
+    setRecognitionSource(job.status === 'approved' ? 'camera-auto' : reviewRequired ? 'camera-review' : 'camera');
+
+    if (job.plate) {
+      setVehicleForm((prev) => ({ ...prev, plate: job.displayPlate || job.plate }));
+    }
+
+    if (job.status === 'queued') {
+      setRecognitionMessage('Şəkil növbəyə atıldı...');
+    } else if (job.status === 'processing') {
+      setRecognitionMessage('Şəkil oxunur...');
+    } else if (job.status === 'manual_review') {
+      if (job.plate) {
+        setRecognitionMessage(
+          `Təsdiq tələb olunur: ${job.displayPlate || job.plate}${job.confidence !== null && job.confidence !== undefined ? ` · ${Number(job.confidence).toFixed(2)}` : ''}`,
+        );
+      } else if (Array.isArray(job.candidates) && job.candidates.length) {
+        setRecognitionMessage('Təsdiq tələb olunur. Aşağıdakı namizədlərdən birini seç.');
+      } else {
+        setRecognitionMessage('Təsdiq tələb olunur, amma namizəd tapılmadı.');
+      }
+    } else if (job.status === 'approved') {
+      setRecognitionMessage(
+        `Oxundu: ${job.displayPlate || job.plate || ''}${job.confidence !== null && job.confidence !== undefined ? ` · ${Number(job.confidence).toFixed(2)}` : ''}`,
+      );
+    } else if (job.status === 'failed') {
+      setRecognitionMessage(job.reason || 'Nömrə oxunmadı.');
+    }
+  };
+
   const saveVehicle = async () => {
     if (!String(vehicleForm.plate).trim()) {
       alert('Maşın nömrəsi yazılmalıdır.');
@@ -81,21 +138,33 @@ function DashboardAftoyuma() {
     }
 
     try {
-      await vehicleEventsApi.create({
-        plate: vehicleForm.plate,
-        direction: 'entry',
-        source: recognitionReviewRequired ? 'camera-review' : recognitionSource,
-        amount: Number(vehicleForm.amount) || 0,
-        note: vehicleForm.note,
-        createdAt: new Date(
-          Number(vehicleForm.il) || currentYear,
-          aylar.indexOf(vehicleForm.ay),
-          Number(vehicleForm.gun) || now.getDate(),
-          now.getHours(),
-          now.getMinutes(),
-          now.getSeconds(),
-        ).toISOString(),
-      });
+      const createdAt = new Date(
+        Number(vehicleForm.il) || currentYear,
+        aylar.indexOf(vehicleForm.ay),
+        Number(vehicleForm.gun) || now.getDate(),
+        now.getHours(),
+        now.getMinutes(),
+        now.getSeconds(),
+      ).toISOString();
+
+      if (recognitionJobId) {
+        await recognitionJobsApi.confirm(recognitionJobId, {
+          plate: vehicleForm.plate,
+          direction: 'entry',
+          amount: Number(vehicleForm.amount) || 0,
+          note: vehicleForm.note,
+          createdAt,
+        });
+      } else {
+        await vehicleEventsApi.create({
+          plate: vehicleForm.plate,
+          direction: 'entry',
+          source: recognitionReviewRequired ? 'camera-review' : recognitionSource,
+          amount: Number(vehicleForm.amount) || 0,
+          note: vehicleForm.note,
+          createdAt,
+        });
+      }
 
       setVehicleForm({
         plate: '',
@@ -105,6 +174,9 @@ function DashboardAftoyuma() {
         ay: currentMonthName,
         gun: String(now.getDate()).padStart(2, '0'),
       });
+      closeRecognitionStream();
+      setRecognitionJobId('');
+      setRecognitionSnapshot(null);
       setRecognitionCandidates([]);
       setRecognitionReviewRequired(false);
       setRecognitionSource('manual');
@@ -120,10 +192,14 @@ function DashboardAftoyuma() {
 
     const dataUrl = await fileToDataUrl(file);
     setCaptureImageDataUrl(dataUrl);
+    setCapturePreviewSize({ width: 0, height: 0 });
     setRecognitionMessage('');
     setRecognitionCandidates([]);
     setRecognitionReviewRequired(false);
     setRecognitionSource('manual');
+    setRecognitionJobId('');
+    setRecognitionSnapshot(null);
+    closeRecognitionStream();
   };
 
   const recognizeCapture = async () => {
@@ -133,10 +209,12 @@ function DashboardAftoyuma() {
     }
 
     setRecognitionBusy(true);
-    setRecognitionMessage('Şəkil oxunur...');
+    setRecognitionMessage('Şəkil növbəyə hazırlanır...');
     setRecognitionCandidates([]);
     setRecognitionReviewRequired(false);
     setRecognitionSource('manual');
+    setRecognitionSnapshot(null);
+    closeRecognitionStream();
 
     try {
       const result = await vehicleVisionApi.recognize({
@@ -144,37 +222,69 @@ function DashboardAftoyuma() {
         direction: 'entry',
         source: 'camera',
         save: false,
+        amount: Number(vehicleForm.amount) || 0,
+        note: vehicleForm.note,
+        createdAt: new Date(
+          Number(vehicleForm.il) || currentYear,
+          aylar.indexOf(vehicleForm.ay),
+          Number(vehicleForm.gun) || now.getDate(),
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds(),
+        ).toISOString(),
       });
 
-      const plate = String(result?.plate || result?.displayPlate || result?.event?.plate || '').trim();
-      const confidence = result?.confidence ?? result?.vision?.confidence ?? result?.event?.confidence ?? null;
-      const reviewRequired = Boolean(result?.reviewRequired ?? result?.vision?.manualReviewRequired);
-      const candidates = Array.isArray(result?.candidates) ? result.candidates : Array.isArray(result?.vision?.candidates) ? result.vision.candidates : [];
-
-      setRecognitionCandidates(candidates);
-      setRecognitionReviewRequired(reviewRequired);
-      setRecognitionSource(reviewRequired ? 'camera-review' : 'camera-auto');
-
-      if (plate) {
-        setVehicleForm((prev) => ({ ...prev, plate }));
-        if (reviewRequired) {
-          setRecognitionMessage(
-            `Təsdiq tələb olunur: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`,
-          );
-        } else {
-          setRecognitionMessage(`Oxundu: ${plate}${confidence !== null && confidence !== undefined ? ` · ${Number(confidence).toFixed(2)}` : ''}`);
-        }
-      } else {
-        if (reviewRequired && candidates.length) {
-          setRecognitionMessage('Təsdiq tələb olunur. Aşağıdakı namizədlərdən birini seç.');
-        } else {
-          setRecognitionMessage(reviewRequired ? 'Təsdiq tələb olunur, amma namizəd tapılmadı.' : 'Nömrə oxunmadı.');
-        }
+      const jobId = result?.jobId;
+      if (!jobId) {
+        throw new Error('Recognition job yaradılmadı.');
       }
+
+      setRecognitionJobId(jobId);
+      setRecognitionMessage('Şəkil növbəyə atıldı...');
+      setRecognitionSnapshot({
+        jobId,
+        status: 'queued',
+        captureUrl: result.captureUrl,
+      });
+
+      const source = new window.EventSource(`/api/recognition-jobs/${jobId}/events`);
+      recognitionStreamRef.current = source;
+
+      source.addEventListener('job', (message) => {
+        try {
+          const job = JSON.parse(message.data);
+          applyRecognitionJob(job);
+          if (job.status === 'approved' || job.status === 'failed') {
+            closeRecognitionStream();
+          }
+        } catch (error) {
+          console.error('Recognition event parse error:', error);
+        }
+      });
+
+      source.addEventListener('error', (message) => {
+        if (message?.data) {
+          try {
+            const payload = JSON.parse(message.data);
+            if (payload?.error) {
+              setRecognitionMessage(payload.error);
+            }
+          } catch {
+            // ignore
+          }
+        }
+        closeRecognitionStream();
+      });
+
+      source.onerror = () => {
+        closeRecognitionStream();
+      };
     } catch (error) {
       setRecognitionMessage(error.message || 'Şəkil oxunmadı.');
       setRecognitionCandidates([]);
       setRecognitionReviewRequired(false);
+      setRecognitionJobId('');
+      setRecognitionSnapshot(null);
     } finally {
       setRecognitionBusy(false);
     }
@@ -280,6 +390,41 @@ function DashboardAftoyuma() {
             <Field label="Kamera screenshot">
               <input type="file" accept="image/*" capture="environment" onChange={handleCaptureChange} style={controlStyle} />
             </Field>
+            {captureImageDataUrl ? (
+              <div style={previewCard}>
+                <div style={previewFrame}>
+                  <img
+                    src={captureImageDataUrl}
+                    alt="Kamera screenshot preview"
+                    style={previewImage}
+                    onLoad={(event) =>
+                      setCapturePreviewSize({
+                        width: event.currentTarget.naturalWidth || 0,
+                        height: event.currentTarget.naturalHeight || 0,
+                      })
+                    }
+                  />
+                  {recognitionSnapshot?.bbox && capturePreviewSize.width && capturePreviewSize.height ? (
+                    <div
+                      style={{
+                        ...bboxOverlay,
+                        left: `${(recognitionSnapshot.bbox[0] / capturePreviewSize.width) * 100}%`,
+                        top: `${(recognitionSnapshot.bbox[1] / capturePreviewSize.height) * 100}%`,
+                        width: `${((recognitionSnapshot.bbox[2] - recognitionSnapshot.bbox[0]) / capturePreviewSize.width) * 100}%`,
+                        height: `${((recognitionSnapshot.bbox[3] - recognitionSnapshot.bbox[1]) / capturePreviewSize.height) * 100}%`,
+                      }}
+                    />
+                  ) : null}
+                  {recognitionSnapshot?.displayPlate ? <div style={plateBadge}>{recognitionSnapshot.displayPlate}</div> : null}
+                </div>
+                <div style={previewMeta}>
+                  <span>{recognitionSnapshot?.status ? `Status: ${recognitionSnapshot.status}` : 'Screenshot hazırdır'}</span>
+                  {recognitionSnapshot?.confidence !== null && recognitionSnapshot?.confidence !== undefined ? (
+                    <span>{Number(recognitionSnapshot.confidence).toFixed(2)}</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <button type="button" style={cameraButton} onClick={recognizeCapture} disabled={recognitionBusy}>
               {recognitionBusy ? 'Oxunur...' : 'YOLO + OCR ilə oxu'}
             </button>
@@ -454,6 +599,57 @@ const cameraPanel = {
   background: '#fff',
   display: 'grid',
   gap: '10px',
+};
+const previewCard = {
+  display: 'grid',
+  gap: '8px',
+  padding: '10px',
+  borderRadius: '12px',
+  border: `1px solid ${theme.colors.border}`,
+  background: 'linear-gradient(180deg, #fbfbfc 0%, #ffffff 100%)',
+};
+const previewFrame = {
+  position: 'relative',
+  width: '100%',
+  overflow: 'hidden',
+  borderRadius: '12px',
+  background: '#111827',
+  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.08)',
+};
+const previewImage = {
+  display: 'block',
+  width: '100%',
+  height: 'auto',
+};
+const bboxOverlay = {
+  position: 'absolute',
+  border: '2px solid #f59e0b',
+  borderRadius: '10px',
+  boxSizing: 'border-box',
+  boxShadow: '0 0 0 2px rgba(245, 158, 11, 0.25)',
+  pointerEvents: 'none',
+};
+const plateBadge = {
+  position: 'absolute',
+  left: '12px',
+  bottom: '12px',
+  padding: '8px 10px',
+  borderRadius: '999px',
+  background: 'rgba(17, 24, 39, 0.88)',
+  color: '#fff',
+  fontSize: '13px',
+  fontWeight: 900,
+  letterSpacing: '0.03em',
+  boxShadow: '0 8px 18px rgba(0, 0, 0, 0.25)',
+};
+const previewMeta = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: '10px',
+  flexWrap: 'wrap',
+  fontSize: '12px',
+  fontWeight: 800,
+  color: theme.colors.muted,
 };
 const cameraButton = {
   padding: '11px 14px',

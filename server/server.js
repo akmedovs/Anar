@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getRecognitionQueue } from './recognition-queue.js';
+import { recognizeImageAtPath, saveCaptureImage as saveRecognitionCaptureImage } from './recognition-core.js';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -372,6 +374,447 @@ function waterReadingToResponse(row) {
     total: toNumber(row.total),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : row.created_at ? new Date(row.created_at).toISOString() : null,
   };
+}
+
+function recognitionJobToResponse(row) {
+  if (!row) return null;
+
+  const input = typeof row.input === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(row.input);
+        } catch {
+          return {};
+        }
+      })()
+    : (row.input || {});
+
+  const bbox = typeof row.bbox === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(row.bbox);
+        } catch {
+          return null;
+        }
+      })()
+    : (row.bbox || null);
+
+  const candidates = typeof row.candidates === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(row.candidates);
+        } catch {
+          return [];
+        }
+      })()
+    : (Array.isArray(row.candidates) ? row.candidates : []);
+
+  const vision = typeof row.vision === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(row.vision);
+        } catch {
+          return {};
+        }
+      })()
+    : (row.vision || {});
+
+  return {
+    id: row.id,
+    jobId: row.public_id,
+    status: row.status,
+    source: row.source,
+    direction: row.direction,
+    captureUrl: row.capture_url,
+    imagePath: row.image_path,
+    input,
+    plate: row.plate,
+    displayPlate: row.display_plate || row.plate,
+    confidence: row.confidence === null ? null : toNumber(row.confidence),
+    reason: row.reason || '',
+    bbox,
+    candidates,
+    vision,
+    manualReviewRequired: Boolean(row.manual_review_required),
+    detectorConfidence: row.detector_confidence === null ? null : toNumber(row.detector_confidence),
+    ocrBackend: row.ocr_backend || '',
+    vehicleEventId: row.vehicle_event_id || null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    processedAt: row.processed_at ? new Date(row.processed_at).toISOString() : null,
+  };
+}
+
+function formatPlateDisplay(value) {
+  if (/^\d{2}[A-Z]{2}\d{3}$/.test(value)) {
+    return `${value.slice(0, 2)} ${value.slice(2, 4)} ${value.slice(4)}`;
+  }
+  return value;
+}
+
+function normalizeRecognitionJobInput(input) {
+  return {
+    direction: input.direction === 'exit' ? 'exit' : 'entry',
+    source: String(input.source || 'camera').trim() || 'camera',
+    createdAt: String(input.createdAt || '').trim() || new Date().toISOString(),
+    amount: toNumber(input.amount),
+    note: String(input.note || '').trim(),
+  };
+}
+
+async function fetchRecognitionJob(publicId) {
+  const result = await query('SELECT * FROM recognition_jobs WHERE public_id = $1', [publicId]);
+  return result.rows[0] || null;
+}
+
+async function updateRecognitionJob(publicId, patch) {
+  const entries = Object.entries(patch).filter(([, value]) => value !== undefined);
+  if (!entries.length) {
+    return fetchRecognitionJob(publicId);
+  }
+
+  const values = [];
+  const assignments = entries.map(([key, value], index) => {
+    values.push(value);
+    return `${key} = $${index + 1}`;
+  });
+  values.push(publicId);
+
+  await query(
+    `UPDATE recognition_jobs SET ${assignments.join(', ')}, updated_at = now() WHERE public_id = $${values.length}`,
+    values,
+  );
+
+  return fetchRecognitionJob(publicId);
+}
+
+async function fetchVehicleEventById(id) {
+  const result = await query('SELECT * FROM vehicle_events WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+async function insertVehicleEventFromJob(jobRow, input, sourceOverride = null) {
+  const parsedInput = typeof jobRow.input === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(jobRow.input);
+        } catch {
+          return {};
+        }
+      })()
+    : (jobRow.input || {});
+
+  const eventInput = {
+    plate: normalizePlate(input.plate || jobRow.plate || ''),
+    direction: input.direction === 'exit' ? 'exit' : jobRow.direction,
+    source: sourceOverride || input.source || jobRow.source || 'camera',
+    confidence: input.confidence === undefined || input.confidence === null ? null : toNumber(input.confidence),
+    amount: toNumber(input.amount ?? parsedInput.amount),
+    note: String(input.note ?? parsedInput.note ?? '').trim(),
+    imageUrl: String(input.imageUrl || jobRow.capture_url || ''),
+    createdAt: String(input.createdAt || parsedInput.createdAt || new Date().toISOString()),
+  };
+
+  const result = await query(
+    `
+      INSERT INTO vehicle_events (
+        plate, direction, source, confidence, image_url, created_at, recognition_job_public_id
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING *
+    `,
+    [
+      eventInput.plate,
+      eventInput.direction,
+      eventInput.source,
+      eventInput.confidence,
+      eventInput.imageUrl,
+      eventInput.createdAt,
+      jobRow.public_id,
+    ],
+  );
+
+  return eventToResponse(result.rows[0]);
+}
+
+async function processRecognitionJobInline(jobRow, capture, input) {
+  const result = await recognizeImageAtPath(capture.absPath, {
+    ...input,
+    captureUrl: capture.publicPath,
+  });
+
+  if (result.reviewRequired) {
+    const updated = await updateRecognitionJob(jobRow.public_id, {
+      status: 'manual_review',
+      plate: result.plate || '',
+      display_plate: result.displayPlate || result.plate || '',
+      confidence: result.confidence,
+      reason: result.reason || 'Təsdiq tələb olunur.',
+      bbox: result.vision?.bbox ? JSON.stringify(result.vision.bbox) : null,
+      candidates: JSON.stringify(result.candidates || []),
+      vision: JSON.stringify(result.vision || {}),
+      detector_confidence: result.detectorConfidence || null,
+      ocr_backend: result.ocrBackend || '',
+      manual_review_required: true,
+      processed_at: new Date().toISOString(),
+    });
+    return recognitionJobToResponse(updated);
+  }
+
+  const event = await insertVehicleEventFromJob(jobRow, result.event || result);
+  const updated = await updateRecognitionJob(jobRow.public_id, {
+    status: 'approved',
+    plate: result.plate || '',
+    display_plate: result.displayPlate || result.plate || '',
+    confidence: result.confidence,
+    reason: result.reason || '',
+    bbox: result.vision?.bbox ? JSON.stringify(result.vision.bbox) : null,
+    candidates: JSON.stringify(result.candidates || []),
+    vision: JSON.stringify(result.vision || {}),
+    detector_confidence: result.detectorConfidence || null,
+    ocr_backend: result.ocrBackend || '',
+    manual_review_required: false,
+    vehicle_event_id: event.id,
+    processed_at: new Date().toISOString(),
+  });
+  return recognitionJobToResponse(updated);
+}
+
+async function createRecognitionJob(input) {
+  const imageDataUrl = String(input.imageDataUrl || '').trim();
+  if (!imageDataUrl) {
+    const error = new Error('Şəkil göndərilməlidir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const capture = await saveRecognitionCaptureImage(imageDataUrl);
+  const jobId = randomUUID();
+  const normalizedInput = normalizeRecognitionJobInput(input);
+  const createdAt = new Date().toISOString();
+
+  const result = await query(
+    `
+      INSERT INTO recognition_jobs (
+        public_id, status, source, direction, capture_url, image_path, input, plate, display_plate, confidence,
+        reason, bbox, candidates, vision, detector_confidence, ocr_backend, manual_review_required, created_at, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        $11,$12,$13,$14,$15,$16,$17,$18,$19
+      )
+      RETURNING *
+    `,
+    [
+      jobId,
+      'queued',
+      normalizedInput.source,
+      normalizedInput.direction,
+      capture.publicPath,
+      capture.absPath,
+      JSON.stringify(normalizedInput),
+      '',
+      '',
+      null,
+      '',
+      null,
+      JSON.stringify([]),
+      JSON.stringify({}),
+      null,
+      '',
+      true,
+      createdAt,
+      createdAt,
+    ],
+  );
+
+  const jobRow = result.rows[0];
+  const queue = getRecognitionQueue();
+  if (queue) {
+    try {
+      await queue.add(
+        'recognize',
+        {
+          jobId: jobRow.public_id,
+          imagePath: capture.absPath,
+          captureUrl: capture.publicPath,
+          input: normalizedInput,
+        },
+        { jobId: jobRow.public_id },
+      );
+    } catch (error) {
+      console.warn('[recognition-job] queue add failed, running inline fallback', error?.message || error);
+      const processed = await processRecognitionJobInline(jobRow, capture, normalizedInput);
+      return {
+        ok: true,
+        jobId: processed.jobId,
+        status: processed.status,
+        captureUrl: capture.publicPath,
+        imagePath: capture.absPath,
+        jobUrl: `/api/recognition-jobs/${jobRow.public_id}`,
+        eventsUrl: `/api/recognition-jobs/${jobRow.public_id}/events`,
+        reviewRequired: processed.manualReviewRequired,
+        message: 'Recognition job inline işlənib.',
+        job: processed,
+      };
+    }
+  } else {
+    const processed = await processRecognitionJobInline(jobRow, capture, normalizedInput);
+    return {
+      ok: true,
+      jobId: processed.jobId,
+      status: processed.status,
+      captureUrl: capture.publicPath,
+      imagePath: capture.absPath,
+      jobUrl: `/api/recognition-jobs/${jobRow.public_id}`,
+      eventsUrl: `/api/recognition-jobs/${jobRow.public_id}/events`,
+      reviewRequired: processed.manualReviewRequired,
+      message: 'Recognition job inline işlənib.',
+      job: processed,
+    };
+  }
+
+  return {
+    ok: true,
+    jobId: jobRow.public_id,
+    status: 'queued',
+    captureUrl: capture.publicPath,
+    imagePath: capture.absPath,
+    jobUrl: `/api/recognition-jobs/${jobRow.public_id}`,
+    eventsUrl: `/api/recognition-jobs/${jobRow.public_id}/events`,
+    reviewRequired: true,
+    message: 'Recognition job yaradıldı.',
+  };
+}
+
+async function confirmRecognitionJob(publicId, input) {
+  const jobRow = await fetchRecognitionJob(publicId);
+  if (!jobRow) {
+    const error = new Error('Recognition job tapılmadı.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (jobRow.vehicle_event_id) {
+    const existingEvent = await fetchVehicleEventById(jobRow.vehicle_event_id);
+    return {
+      ok: true,
+      job: recognitionJobToResponse(jobRow),
+      event: existingEvent ? eventToResponse(existingEvent) : null,
+    };
+  }
+
+  const plate = normalizePlate(input.plate || jobRow.plate || '');
+  if (!plate) {
+    const error = new Error('Nömrə boş ola bilməz.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const parsedInput = typeof jobRow.input === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(jobRow.input);
+        } catch {
+          return {};
+        }
+      })()
+    : (jobRow.input || {});
+
+  const event = await insertVehicleEventFromJob(
+    jobRow,
+    {
+      plate,
+      direction: input.direction || jobRow.direction,
+      source: 'camera-review',
+      confidence: input.confidence ?? jobRow.confidence,
+      amount: input.amount ?? (parsedInput.amount || 0),
+      note: input.note ?? parsedInput.note ?? '',
+      imageUrl: jobRow.capture_url,
+      createdAt: input.createdAt ?? parsedInput.createdAt ?? new Date().toISOString(),
+    },
+    'camera-review',
+  );
+
+  const updated = await updateRecognitionJob(publicId, {
+    status: 'approved',
+    plate,
+    display_plate: input.displayPlate || formatPlateDisplay(plate),
+    manual_review_required: false,
+    vehicle_event_id: event.id,
+    reason: '',
+    processed_at: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    job: recognitionJobToResponse(updated),
+    event,
+  };
+}
+
+async function streamRecognitionJobEvents(publicId, req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  let lastSignature = '';
+  let closed = false;
+
+  const pushSnapshot = async () => {
+    if (closed) return;
+    const jobRow = await fetchRecognitionJob(publicId);
+    if (!jobRow) {
+      send('error', { error: 'Recognition job tapılmadı.' });
+      clearInterval(timer);
+      closed = true;
+      res.end();
+      return;
+    }
+
+    const snapshot = recognitionJobToResponse(jobRow);
+    const signature = JSON.stringify([
+      snapshot.status,
+      snapshot.updatedAt,
+      snapshot.vehicleEventId,
+      snapshot.reason,
+      snapshot.plate,
+      snapshot.displayPlate,
+      snapshot.confidence,
+    ]);
+
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      send('job', snapshot);
+    }
+
+    if (snapshot.status === 'approved' || snapshot.status === 'failed') {
+      clearInterval(timer);
+      closed = true;
+      res.end();
+    }
+  };
+
+  const timer = setInterval(() => {
+    pushSnapshot().catch((error) => {
+      if (closed) return;
+      send('error', { error: error.message || String(error) });
+    });
+  }, 1000);
+
+  req.on('close', () => {
+    closed = true;
+    clearInterval(timer);
+    res.end();
+  });
+
+  await pushSnapshot();
 }
 
 function normalizeReport(input) {
@@ -1189,6 +1632,30 @@ async function handleRequest(req, res) {
     return;
   }
 
+  const recognitionJobEventsMatch = url.pathname.match(/^\/api\/recognition-jobs\/([^/]+)\/events$/);
+  const recognitionJobDetailMatch = url.pathname.match(/^\/api\/recognition-jobs\/([^/]+)$/);
+  const recognitionJobConfirmMatch = url.pathname.match(/^\/api\/recognition-jobs\/([^/]+)\/confirm$/);
+
+  if (recognitionJobEventsMatch && req.method === 'GET') {
+    await streamRecognitionJobEvents(recognitionJobEventsMatch[1], req, res);
+    return;
+  }
+
+  if (recognitionJobDetailMatch && req.method === 'GET') {
+    const job = await fetchRecognitionJob(recognitionJobDetailMatch[1]);
+    if (!job) {
+      sendJson(res, 404, { error: 'Recognition job tapılmadı.' });
+      return;
+    }
+    sendJson(res, 200, recognitionJobToResponse(job));
+    return;
+  }
+
+  if (recognitionJobConfirmMatch && req.method === 'POST') {
+    sendJson(res, 200, await confirmRecognitionJob(recognitionJobConfirmMatch[1], await readJson(req)));
+    return;
+  }
+
   if (url.pathname === '/api/vehicle-events' && req.method === 'GET') {
     sendJson(res, 200, await listVehicleEvents());
     return;
@@ -1200,7 +1667,7 @@ async function handleRequest(req, res) {
   }
 
   if (url.pathname === '/api/vehicle-events/recognize' && req.method === 'POST') {
-    sendJson(res, 201, await recognizeVehicleCapture(await readJson(req)));
+    sendJson(res, 201, await createRecognitionJob(await readJson(req)));
     return;
   }
 

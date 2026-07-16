@@ -1,4 +1,9 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: anar-redis
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     container_name: anar-db
@@ -24,11 +29,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
       vision:
         condition: service_started
     environment:
       PORT: 3001
       DATABASE_URL: "postgres://anar_user:07570931017072aA%21@db:5432/anar"
+      REDIS_URL: redis://redis:6379
       VEHICLE_VISION_COMMAND: python3
       VEHICLE_VISION_TIMEOUT_MS: 120000
       VEHICLE_VISION_URL: http://vision:8000
@@ -41,6 +49,34 @@ services:
       - anar_uploads:/app/server/uploads
     ports:
       - "3001:3001"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: anar-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      vision:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgres://anar_user:07570931017072aA%21@db:5432/anar"
+      REDIS_URL: redis://redis:6379
+      VEHICLE_VISION_COMMAND: python3
+      VEHICLE_VISION_TIMEOUT_MS: 120000
+      VEHICLE_VISION_URL: http://vision:8000
+      VEHICLE_OCR_BACKENDS: paddle,tesseract
+      VEHICLE_PADDLE_TIMEOUT_MS: 45000
+      VEHICLE_OCR_LANG: en
+      VEHICLE_YOLO_MODEL: ""
+      VEHICLE_YOLO_CONF: 0.25
+    volumes:
+      - anar_uploads:/app/server/uploads
+    command: ["node", "server/recognition-worker.js"]
 
   vision:
     build:
@@ -61,6 +97,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   web:
     build:

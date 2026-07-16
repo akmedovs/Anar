@@ -96,6 +96,18 @@ export const vehicleVisionApi = {
   },
 };
 
+export const recognitionJobsApi = {
+  get(jobId) {
+    return request(`/api/recognition-jobs/${jobId}`);
+  },
+  confirm(jobId, payload) {
+    return request(`/api/recognition-jobs/${jobId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
 export const washExpensesApi = {
   list(filters = {}) {
     const params = new URLSearchParams();
