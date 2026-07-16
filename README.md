@@ -7,7 +7,7 @@ Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + Postgre
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3001`
 - Database: PostgreSQL
-- Opsional: vehicle recognition üçün Python skripti və onun Docker image-i daxilindəki paketləri
+- Opsional: vehicle recognition üçün ayrı `FastAPI` vision servisi və onun Docker image-i daxilindəki paketləri
 
 ## Docker ilə işə salma
 
@@ -74,8 +74,10 @@ cp .env.example .env
 
 - `DATABASE_URL`
 - `PORT` - backend portu, default `3001`
-- `VEHICLE_VISION_COMMAND` - default `python3`
-- `VEHICLE_OCR_BACKENDS` - OCR sırası, məsələn `paddle,tesseract`
+- `VEHICLE_VISION_COMMAND` - legacy CLI fallback üçün default `python3`
+- `VEHICLE_VISION_URL` - vision servisi, default `http://vision:8000`
+- `VEHICLE_VISION_TIMEOUT_MS` / `VEHICLE_VISION_HTTP_TIMEOUT_MS`
+- `VEHICLE_OCR_BACKENDS` - OCR sırası, məsələn `easyocr,paddle,tesseract`
 - `VEHICLE_PADDLE_TIMEOUT_MS` - Paddle worker timeout, default `45000`
 - `VEHICLE_OCR_LANG` - OCR dili, default `en`
 - `VEHICLE_YOLO_MODEL` - plate detector modeli; boşdursa sistem manual review rejimində qalır
@@ -99,5 +101,6 @@ cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
 
 - `web` konteyneri frontend-i `5173`-də açır.
 - `api` konteyneri backend-i `3001`-də açır.
+- `vision` konteyneri plate recognition pipeline-i `8000`-də açır.
 - `db` konteyneri PostgreSQL saxlayır.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.

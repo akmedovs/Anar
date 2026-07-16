@@ -57,8 +57,9 @@ cd Anar
 docker compose up -d --build
 ```
 
-Bu versiyada avtomatik oxuma üçün `YOLO` detector + OCR + strict regex + manual confirm flow istifadə olunur.
-`VEHICLE_OCR_BACKENDS=paddle,tesseract` olduqda server əvvəlcə Paddle worker-i sınayır, alınmasa Tesseract fallback işləyir.
+Bu versiyada avtomatik oxuma üçün `FastAPI vision service` + `YOLO` detector + `OpenCV` + `EasyOCR/Paddle/Tesseract` + strict regex + manual confirm flow istifadə olunur.
+`VEHICLE_VISION_URL=http://vision:8000` Node backend-in qoşulduğu vision servisidir.
+`VEHICLE_OCR_BACKENDS=easyocr,paddle,tesseract` olduqda servis əvvəlcə EasyOCR-u, sonra Paddle/Tesseract fallback-ləri sınayır.
 `VEHICLE_PADDLE_TIMEOUT_MS` ilə Paddle worker timeout-unı tənzimləyə bilərsiniz.
 `VEHICLE_YOLO_MODEL` boşdursa, sistem plate-i auto-saxlamır və manual review təklif edir.
 
@@ -131,7 +132,7 @@ git pull
 docker compose up -d --build
 ```
 
-Əgər maşın nömrəsi tanınmırsa, serverdə `VEHICLE_YOLO_MODEL` düzgün model faylına yönəlməli və son `server/vehicle-vision.py` istifadə olunmalıdır.
+Əgər maşın nömrəsi tanınmırsa, serverdə `VEHICLE_YOLO_MODEL` düzgün model faylına yönəlməli və `vision` servisi ilə `server/vision_service.py` işlədilməlidir.
 
 ## Qeyd
 

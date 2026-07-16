@@ -10,6 +10,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
   torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip3 install --no-cache-dir --break-system-packages paddlepaddle paddleocr ultralytics opencv-python-headless pytesseract
+RUN pip3 install --no-cache-dir --break-system-packages fastapi "uvicorn[standard]" easyocr
 
 COPY package*.json ./
 RUN npm ci

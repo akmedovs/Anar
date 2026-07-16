@@ -524,6 +524,60 @@ function runVisionScript(imagePath) {
   });
 }
 
+async function runVisionService(imagePath) {
+  const baseUrl = String(process.env.VEHICLE_VISION_URL || 'http://vision:8000').trim().replace(/\/$/, '');
+  const timeoutMs = Number(process.env.VEHICLE_VISION_HTTP_TIMEOUT_MS || process.env.VEHICLE_VISION_TIMEOUT_MS || 120000) || 120000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${baseUrl}/recognize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imagePath }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(`Vision service ${response.status}: ${rawText.slice(0, 200)}`);
+    }
+
+    if (!rawText.trim()) {
+      throw new Error('Vision service boş cavab qaytardı.');
+    }
+
+    return JSON.parse(rawText);
+  } catch (error) {
+    const message = error?.name === 'AbortError'
+      ? `Vision service timeout after ${timeoutMs}ms.`
+      : (error?.message || String(error));
+    console.error('[vehicle-vision] fastapi service failed', {
+      imagePath,
+      message,
+      baseUrl,
+      timeoutMs,
+    });
+    throw new Error(message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runVisionPipeline(imagePath) {
+  try {
+    return await runVisionService(imagePath);
+  } catch (serviceError) {
+    console.error('[vehicle-vision] using legacy cli fallback', {
+      imagePath,
+      message: serviceError?.message || String(serviceError),
+    });
+    return runVisionScript(imagePath);
+  }
+}
+
 function normalizePlate(value) {
   return String(value || '')
     .trim()
@@ -555,7 +609,7 @@ async function recognizeVehicleCapture(input) {
   });
   let visionResult;
   try {
-    visionResult = await runVisionScript(capture.absPath);
+    visionResult = await runVisionPipeline(capture.absPath);
   } catch (error) {
     const timeoutHit = /timeout/i.test(String(error?.message || ''));
     console.error('[vehicle-vision] falling back to manual review', {
