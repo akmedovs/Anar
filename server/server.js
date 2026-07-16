@@ -577,6 +577,7 @@ async function recognizeVehicleCapture(input) {
     displayPlate: visionResult?.displayPlate || plate,
     confidence,
     candidates: Array.isArray(visionResult?.candidates) ? visionResult.candidates : [],
+    ocrBackendsTried: Array.isArray(visionResult?.backendsTried) ? visionResult.backendsTried : [],
     event: plate ? {
       plate,
       direction,

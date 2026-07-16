@@ -58,7 +58,8 @@ docker compose up -d --build
 ```
 
 Bu versiyada avtomatik oxuma üçün `YOLO` detector + OCR + strict regex + manual confirm flow istifadə olunur.
-`VEHICLE_OCR_BACKEND=auto` olduqda server əvvəlcə Paddle uyğunluğunu yoxlayır, uyğun deyilsə Tesseract fallback işləyir.
+`VEHICLE_OCR_BACKENDS=paddle,tesseract` olduqda server əvvəlcə Paddle worker-i sınayır, alınmasa Tesseract fallback işləyir.
+`VEHICLE_PADDLE_TIMEOUT_MS` ilə Paddle worker timeout-unı tənzimləyə bilərsiniz.
 `VEHICLE_YOLO_MODEL` boşdursa, sistem plate-i auto-saxlamır və manual review təklif edir.
 
 ## 6. Yoxlama

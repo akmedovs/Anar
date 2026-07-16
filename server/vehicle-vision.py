@@ -2,7 +2,9 @@
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -104,6 +106,8 @@ STRICT_PLATE_PATTERNS = [
 AUTO_ACCEPT_MIN_OCR_SCORE = 0.85
 AUTO_ACCEPT_MIN_DET_SCORE = 0.35
 
+OCR_BACKEND_PRIORITY = ('paddle', 'tesseract')
+
 
 def is_strict_plate(value):
     return any(pattern.fullmatch(value) for pattern in STRICT_PLATE_PATTERNS)
@@ -132,24 +136,30 @@ def _cpu_flags():
     return set()
 
 
-@lru_cache(maxsize=1)
-def paddle_runtime_available():
-    if os.environ.get('VEHICLE_ALLOW_UNSAFE_PADDLE', '').strip() == '1':
-        return True
-    flags = _cpu_flags()
-    # Current server image lacks avx2, which is where the installed Paddle wheel
-    # has been crashing with illegal instruction during import.
-    return 'avx2' in flags
+def ocr_backend_order():
+    requested = os.environ.get('VEHICLE_OCR_BACKENDS', '').strip().lower()
+    if requested:
+        order = [item.strip() for item in requested.split(',') if item.strip()]
+    else:
+        single = os.environ.get('VEHICLE_OCR_BACKEND', 'auto').strip().lower()
+        if single in {'paddle', 'tesseract'}:
+            order = [single]
+        else:
+            order = list(OCR_BACKEND_PRIORITY)
+
+    normalized = []
+    for backend in order:
+        if backend not in {'paddle', 'tesseract'}:
+            continue
+        if backend not in normalized:
+            normalized.append(backend)
+
+    return normalized or list(OCR_BACKEND_PRIORITY)
 
 
 @lru_cache(maxsize=1)
 def selected_ocr_backend():
-    requested = os.environ.get('VEHICLE_OCR_BACKEND', 'auto').strip().lower()
-    if requested in {'paddle', 'tesseract'}:
-        if requested == 'paddle' and not paddle_runtime_available():
-            return 'tesseract'
-        return requested
-    return 'paddle' if paddle_runtime_available() else 'tesseract'
+    return ocr_backend_order()[0]
 
 
 def tesseract_language():
@@ -173,32 +183,87 @@ def tesseract_configs():
     return base_flags
 
 
-@lru_cache(maxsize=1)
-def load_paddle_ocr():
+def paddle_ocr_worker_path():
+    return Path(__file__).with_name('vehicle-ocr-worker.py')
+
+
+def write_temp_variant(image, cv2_module):
+    if image is None:
+        return None
+
+    if cv2_module is None:
+        return None
+
+    handle = tempfile.NamedTemporaryFile(prefix='vehicle-ocr-', suffix='.png', delete=False)
+    handle.close()
+    temp_path = Path(handle.name)
     try:
-        from paddleocr import PaddleOCR
+        if not cv2_module.imwrite(str(temp_path), image):
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+            return None
+        return temp_path
+    except Exception:
+        try:
+            temp_path.unlink()
+        except Exception:
+            pass
+        return None
+
+
+def run_paddle_ocr(image, *, image_path=None, cv2_module=None):
+    worker = paddle_ocr_worker_path()
+    source_path = None
+    temp_path = None
+
+    if image is not None and cv2_module is not None:
+        temp_path = write_temp_variant(image, cv2_module)
+        source_path = temp_path
+    elif image_path is not None:
+        source_path = Path(image_path)
+
+    if source_path is None:
+        raise RuntimeError('PaddleOCR input image is unavailable.')
+
+    timeout_ms = int(os.environ.get('VEHICLE_PADDLE_TIMEOUT_MS', '45000') or '45000')
+    timeout_seconds = max(5.0, timeout_ms / 1000.0)
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(worker), str(source_path), tesseract_language()],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+    stdout = str(completed.stdout or '').strip()
+    stderr = str(completed.stderr or '').strip()
+    if completed.returncode != 0:
+        message = stderr or stdout or f'PaddleOCR worker failed with exit code {completed.returncode}'
+        raise RuntimeError(message)
+
+    if not stdout:
+        raise RuntimeError('PaddleOCR worker returned empty output.')
+
+    try:
+        payload = json.loads(stdout)
     except Exception as error:
-        raise RuntimeError(f'PaddleOCR import failed: {error}')
+        raise RuntimeError(f'PaddleOCR worker returned invalid JSON: {error}')
 
-    lang = os.environ.get('VEHICLE_OCR_LANG', 'en').strip() or 'en'
-    return PaddleOCR(
-        lang=lang,
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-    )
+    if isinstance(payload, dict):
+        lines = payload.get('lines') or payload.get('data') or []
+    else:
+        lines = payload
 
-
-def run_paddle_ocr(image):
-    ocr = load_paddle_ocr()
-
-    if hasattr(ocr, 'ocr'):
-        return ocr.ocr(image, cls=True)
-
-    if hasattr(ocr, 'predict'):
-        return ocr.predict(image)
-
-    raise RuntimeError('PaddleOCR API is not supported by the installed version.')
+    return lines
 
 
 def run_tesseract_ocr(image, config=None):
@@ -267,6 +332,16 @@ def run_tesseract_ocr(image, config=None):
             lines.append({'text': raw_text, 'confidence': 0.35})
 
     return lines
+
+
+def run_backend_ocr(backend, image, image_path, cv2_module):
+    if backend == 'paddle':
+        return run_paddle_ocr(image, image_path=image_path, cv2_module=cv2_module)
+
+    if backend == 'tesseract':
+        return run_tesseract_ocr(image)
+
+    raise RuntimeError(f'Unsupported OCR backend: {backend}')
 
 
 def iter_ocr_lines(result):
@@ -404,6 +479,25 @@ def build_heuristic_regions(image):
     return regions
 
 
+def dedupe_candidates(candidates):
+    best_by_plate = {}
+    for candidate in candidates:
+        plate = candidate.get('plate') or ''
+        current = best_by_plate.get(plate)
+        if current is None:
+            best_by_plate[plate] = candidate
+            continue
+
+        current_key = (current.get('score', 0), current.get('confidence', 0), len(current.get('plate', '')))
+        candidate_key = (candidate.get('score', 0), candidate.get('confidence', 0), len(candidate.get('plate', '')))
+        if candidate_key > current_key:
+            best_by_plate[plate] = candidate
+
+    merged = list(best_by_plate.values())
+    merged.sort(key=lambda item: (item['score'], item['confidence'], len(item['plate'])), reverse=True)
+    return merged
+
+
 def heuristic_plate_crop(image):
     regions = build_heuristic_regions(image)
     for label, region in regions:
@@ -424,7 +518,7 @@ def compute_candidate_score(text_score, detector_score, plate):
     return score
 
 
-def extract_candidates(ocr_lines, detector_score, source_label, region_label, strict_only=True):
+def extract_candidates(ocr_lines, detector_score, source_label, region_label, strict_only=True, backend='unknown'):
     candidates = []
     for line in ocr_lines:
         text = str(line.get('text') or '').strip()
@@ -450,6 +544,7 @@ def extract_candidates(ocr_lines, detector_score, source_label, region_label, st
             'score': round(compute_candidate_score(text_score, detector_score, plate), 2),
             'source': source_label,
             'region': region_label,
+            'backend': backend,
             'strict': strict,
         }
         candidates.append(candidate)
@@ -546,46 +641,48 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
     if image is None:
         return None
 
-    backend = selected_ocr_backend()
+    backends = ocr_backend_order()
 
     regions = [("full", image)]
     if image is not None:
         regions.extend(build_heuristic_regions(image)[1:])
 
-    for region_label, region in regions:
-        if region is None:
-            continue
-
-        for variant_index, variant in enumerate(build_ocr_variants(region)):
-            if backend == 'paddle':
-                try:
-                    ocr_result = run_paddle_ocr(variant)
-                except Exception:
-                    continue
-
-                lines = iter_ocr_lines(ocr_result)
-                strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
-                loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False))
+    for backend in backends:
+        for region_label, region in regions:
+            if region is None:
                 continue
 
-            for ocr_config in tesseract_configs():
-                try:
-                    ocr_result = run_tesseract_ocr(variant, config=ocr_config)
-                except Exception:
+            for variant_index, variant in enumerate(build_ocr_variants(region)):
+                if backend == 'paddle':
+                    try:
+                        ocr_result = run_backend_ocr(backend, variant, image_path, cv2_module)
+                    except Exception:
+                        continue
+
+                    lines = iter_ocr_lines(ocr_result)
+                    if not lines:
+                        continue
+                    strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend))
+                    loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend))
                     continue
 
-                lines = iter_ocr_lines(ocr_result)
-                if not lines:
-                    continue
+                for ocr_config in tesseract_configs():
+                    try:
+                        ocr_result = run_tesseract_ocr(variant, config=ocr_config)
+                    except Exception:
+                        continue
 
-                strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True))
-                loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False))
+                    lines = iter_ocr_lines(ocr_result)
+                    if not lines:
+                        continue
 
-    candidates = strict_candidates or loose_candidates
+                    strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend))
+                    loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend))
+
+    candidates = dedupe_candidates(strict_candidates + loose_candidates)
     if not candidates:
         return None
 
-    candidates.sort(key=lambda item: (item['score'], item['confidence'], len(item['plate'])), reverse=True)
     best = candidates[0]
     return {
         'plate': best['plate'],
@@ -594,9 +691,10 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         'score': best['score'],
         'confidence': best['confidence'],
         'source': best['source'],
-        'backend': backend,
+        'backend': best['backend'],
         'strictPlate': bool(best.get('strict')),
         'candidates': candidates[:5],
+        'backendsTried': backends,
     }
 
 

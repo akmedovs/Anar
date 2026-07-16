@@ -29,7 +29,8 @@ services:
       DATABASE_URL: "postgres://anar_user:07570931017072aA%21@db:5432/anar"
       VEHICLE_VISION_COMMAND: python3
       VEHICLE_VISION_TIMEOUT_MS: 300000
-      VEHICLE_OCR_BACKEND: tesseract
+      VEHICLE_OCR_BACKENDS: paddle,tesseract
+      VEHICLE_PADDLE_TIMEOUT_MS: 45000
       VEHICLE_OCR_LANG: en
       VEHICLE_YOLO_MODEL: ""
       VEHICLE_YOLO_CONF: 0.25

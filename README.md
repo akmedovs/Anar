@@ -75,7 +75,8 @@ cp .env.example .env
 - `DATABASE_URL`
 - `PORT` - backend portu, default `3001`
 - `VEHICLE_VISION_COMMAND` - default `python3`
-- `VEHICLE_OCR_BACKEND` - `auto`, `paddle` və ya `tesseract`
+- `VEHICLE_OCR_BACKENDS` - OCR sırası, məsələn `paddle,tesseract`
+- `VEHICLE_PADDLE_TIMEOUT_MS` - Paddle worker timeout, default `45000`
 - `VEHICLE_OCR_LANG` - OCR dili, default `en`
 - `VEHICLE_YOLO_MODEL` - plate detector modeli; boşdursa sistem manual review rejimində qalır
 - `VEHICLE_YOLO_CONF`
