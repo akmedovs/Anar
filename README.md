@@ -10,15 +10,30 @@ Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + Postgre
 - Opsional: vehicle recognition üçün ayrı `FastAPI` vision servisi və onun Docker image-i daxilindəki paketləri
 
 
-## Installation - Ubuntu serverdə 5 addım
+## Installation - sıfır Ubuntu serverdə qurulum
 
-Aşağıdakı komandalar təmiz Ubuntu serverdə layihəni Docker ilə ayağa qaldırmaq üçündür.
+Bu bölmə yeni Ubuntu serverdə layihəni tam Docker ilə ayağa qaldırmaq üçündür. Komandaları ardıcıl yaz.
 
-### 1. Sistem paketlərini yenilə və Docker quraşdır
+### 0. Serverə daxil ol
+
+Öz kompüterindən serverə SSH ilə gir:
+
+```bash
+ssh USERNAME@SERVER_IP
+```
+
+Məsələn:
+
+```bash
+ssh anar@192.168.25.150
+```
+
+### 1. Sistemi hazırla və Docker quraşdır
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl git
+sudo apt upgrade -y
+sudo apt install -y ca-certificates curl git ufw
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -27,28 +42,58 @@ sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
-### 2. Layihəni serverə çək
+İstifadəçini Docker qrupuna əlavə et:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+docker --version
+docker compose version
+```
+
+### 2. Firewall portlarını aç
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 5173/tcp
+sudo ufw allow 3001/tcp
+sudo ufw --force enable
+sudo ufw status
+```
+
+Sayt üçün əsas port `5173`-dür. Backend API üçün `3001` açıq saxlanılır.
+
+### 3. Layihəni GitHub-dan serverə çək
 
 ```bash
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
 ```
 
-### 3. Environment faylını hazırla
+Əgər repo artıq serverdə varsa:
+
+```bash
+cd ~/Anar
+git pull origin main
+```
+
+### 4. Environment faylını hazırla
 
 ```bash
 cp .env.example .env
 ```
 
-Lazımdırsa `.env` içində database və OCR dəyişənlərini dəyiş. Docker Compose default ayarlarla da işləyir.
+Docker Compose içində default PostgreSQL, Redis, API, Vision və Web ayarları hazırdır. Adi qurulum üçün `.env` dəyişmədən də başlamaq olar.
 
-### 4. Proyekti build edib işə sal
+### 5. Proyekti build edib işə sal
 
 ```bash
 docker compose up -d --build
 ```
 
-### 5. Statusu yoxla
+İlk build bir az vaxt apara bilər, çünki OCR/YOLO paketləri və modellər image-ə əlavə olunur.
+
+### 6. Statusu yoxla
 
 ```bash
 docker compose ps
@@ -62,6 +107,33 @@ Uğurlu cavab belə olmalıdır:
 ```
 
 Sayt: `http://SERVER_IP:5173`
+
+Məsələn:
+
+```text
+http://192.168.25.150:5173
+```
+
+Login səhifəsində project üçün təyin edilmiş istifadəçi adı və parol ilə daxil ol.
+
+### Docker artıq qurulubsa qısa qurulum
+
+Əgər Ubuntu serverdə Docker artıq hazırdırsa, sadəcə bunları yaz:
+
+```bash
+git clone https://github.com/akmedovs/Anar.git
+cd Anar
+cp .env.example .env
+docker compose up -d --build
+docker compose ps
+curl http://localhost:3001/api/health
+```
+
+Brauzerdə aç:
+
+```text
+http://SERVER_IP:5173
+```
 
 ## Docker ilə işə salma
 
