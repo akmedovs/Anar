@@ -40,10 +40,12 @@ services:
       VEHICLE_VISION_COMMAND: python3
       VEHICLE_VISION_TIMEOUT_MS: 120000
       VEHICLE_VISION_URL: http://vision:8000
-      VEHICLE_OCR_BACKENDS: paddle,tesseract
-      VEHICLE_PADDLE_TIMEOUT_MS: 45000
+      VEHICLE_OCR_BACKENDS: tesseract
+      VEHICLE_PADDLE_TIMEOUT_MS: 15000
       VEHICLE_OCR_LANG: en
-      VEHICLE_YOLO_MODEL: ""
+      VEHICLE_OCR_MAX_VARIANTS: 2
+      VEHICLE_OCR_MAX_REGIONS: 2
+      VEHICLE_YOLO_MODEL: /app/server/models/yolov8-plate/weights/yolov8s.pt
       VEHICLE_YOLO_CONF: 0.25
     volumes:
       - anar_uploads:/app/server/uploads
@@ -69,10 +71,12 @@ services:
       VEHICLE_VISION_COMMAND: python3
       VEHICLE_VISION_TIMEOUT_MS: 120000
       VEHICLE_VISION_URL: http://vision:8000
-      VEHICLE_OCR_BACKENDS: paddle,tesseract
-      VEHICLE_PADDLE_TIMEOUT_MS: 45000
+      VEHICLE_OCR_BACKENDS: tesseract
+      VEHICLE_PADDLE_TIMEOUT_MS: 15000
       VEHICLE_OCR_LANG: en
-      VEHICLE_YOLO_MODEL: ""
+      VEHICLE_OCR_MAX_VARIANTS: 2
+      VEHICLE_OCR_MAX_REGIONS: 2
+      VEHICLE_YOLO_MODEL: /app/server/models/yolov8-plate/weights/yolov8s.pt
       VEHICLE_YOLO_CONF: 0.25
     volumes:
       - anar_uploads:/app/server/uploads
@@ -86,10 +90,12 @@ services:
     restart: unless-stopped
     environment:
       PORT: 8000
-      VEHICLE_OCR_BACKENDS: easyocr,paddle,tesseract
-      VEHICLE_PADDLE_TIMEOUT_MS: 45000
+      VEHICLE_OCR_BACKENDS: tesseract
+      VEHICLE_PADDLE_TIMEOUT_MS: 15000
       VEHICLE_OCR_LANG: en
-      VEHICLE_YOLO_MODEL: ""
+      VEHICLE_OCR_MAX_VARIANTS: 2
+      VEHICLE_OCR_MAX_REGIONS: 2
+      VEHICLE_YOLO_MODEL: /app/server/models/yolov8-plate/weights/yolov8s.pt
       VEHICLE_YOLO_CONF: 0.25
     volumes:
       - anar_uploads:/app/server/uploads

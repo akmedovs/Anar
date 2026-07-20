@@ -82,6 +82,12 @@ def normalize_plate_candidate(raw):
     if exact:
         return exact.group(1)
 
+    # Do not synthesize plates from long noisy OCR lines.
+    # Example: "SSS 4 S32 A BOS 4" can be over-corrected into "32AB054".
+    # Short near-misses such as "410UK075-" are still allowed and become "10UK075".
+    if len(value) > 10:
+        return ""
+
     corrected = parse_az_license_plate(value)
     if corrected:
         return corrected
@@ -170,7 +176,7 @@ STRICT_PLATE_PATTERNS = [
 AUTO_ACCEPT_MIN_OCR_SCORE = 0.85
 AUTO_ACCEPT_MIN_DET_SCORE = 0.35
 
-OCR_BACKEND_PRIORITY = ('tesseract', 'paddle')
+OCR_BACKEND_PRIORITY = ('tesseract',)
 
 
 def is_strict_plate(value):
@@ -466,14 +472,22 @@ def preprocess_plate_image(image):
         gray = image
 
     h, w = gray.shape[:2]
-    crop_y = int(h * 0.05)
-    crop_x = int(w * 0.08)
+    crop_y = int(h * 0.04)
+    crop_x = int(w * 0.04)
     if h - crop_y * 2 > 0 and w - crop_x * 2 > 0:
         gray = gray[crop_y:h - crop_y, crop_x:w - crop_x]
 
-    enlarged = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    blurred = cv2.GaussianBlur(enlarged, (3, 3), 0)
-    return blurred
+    target_height = 90
+    scale = max(1.5, min(4.0, target_height / max(1, gray.shape[0])))
+    enlarged = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    denoised = cv2.bilateralFilter(enlarged, 7, 45, 45)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    enhanced = clahe.apply(denoised)
+
+    sharpen = cv2.GaussianBlur(enhanced, (0, 0), 1.0)
+    sharpened = cv2.addWeighted(enhanced, 1.5, sharpen, -0.5, 0)
+    return sharpened
 
 
 def build_ocr_variants(image):
@@ -489,60 +503,125 @@ def build_ocr_variants(image):
     if base is None:
         return []
 
-    variants = [base]
-
-    wash_variant = preprocess_for_wash(image)
-    if wash_variant is not None:
-        variants.append(wash_variant)
-
     _, otsu = cv2.threshold(base, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(otsu)
-    variants.append(cv2.bitwise_not(otsu))
-
     adaptive = cv2.adaptiveThreshold(
         base,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
         31,
-        11,
+        9,
     )
-    variants.append(adaptive)
-    variants.append(cv2.bitwise_not(adaptive))
 
-    sharpen_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    sharpened = cv2.filter2D(base, -1, sharpen_kernel)
-    variants.append(sharpened)
+    # Keep the high-yield variants first because production limits max variants for speed.
+    variants = [otsu, adaptive, base, cv2.bitwise_not(otsu)]
 
-    return variants
+    wash_variant = preprocess_for_wash(image)
+    if wash_variant is not None:
+        variants.append(wash_variant)
+
+    unique = []
+    seen = set()
+    for variant in variants:
+        if variant is None:
+            continue
+        key = (variant.shape[:2], variant.tobytes()[:2048])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(variant)
+    return unique
 
 
-def build_heuristic_regions(image):
+def _append_region(regions, seen, label, image, x1, y1, x2, y2):
+    if image is None:
+        return
+    height, width = image.shape[:2]
+    x1 = max(0, min(width, int(x1)))
+    x2 = max(0, min(width, int(x2)))
+    y1 = max(0, min(height, int(y1)))
+    y2 = max(0, min(height, int(y2)))
+    if x2 - x1 < 50 or y2 - y1 < 18:
+        return
+    key = (round(x1 / 8), round(y1 / 8), round(x2 / 8), round(y2 / 8))
+    if key in seen:
+        return
+    seen.add(key)
+    regions.append((label, image[y1:y2, x1:x2]))
+
+
+def detect_candidate_plate_regions(image):
     try:
         import cv2
     except Exception:
-        return [('full', image)] if image is not None else []
+        return []
 
     if image is None:
         return []
 
     height, width = image.shape[:2]
-    regions = [('full', image)]
+    if height < 60 or width < 120:
+        return []
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    gray = cv2.bilateralFilter(gray, 7, 45, 45)
+    blackhat_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
+    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, blackhat_kernel)
+    grad_x = cv2.Sobel(blackhat, cv2.CV_32F, 1, 0, ksize=3)
+    grad_x = cv2.convertScaleAbs(grad_x)
+    grad_x = cv2.GaussianBlur(grad_x, (5, 5), 0)
+    closed_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (23, 5))
+    closed = cv2.morphologyEx(grad_x, cv2.MORPH_CLOSE, closed_kernel)
+    thresh = cv2.threshold(closed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    thresh = cv2.erode(thresh, None, iterations=1)
+    thresh = cv2.dilate(thresh, None, iterations=2)
+
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    boxes = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < width * 0.12 or h < height * 0.025:
+            continue
+        aspect = w / max(1, h)
+        if aspect < 2.0 or aspect > 7.5:
+            continue
+        area_ratio = (w * h) / max(1, width * height)
+        if area_ratio < 0.003 or area_ratio > 0.25:
+            continue
+        center_bias = 1.0 - min(1.0, abs((y + h / 2) - height * 0.68) / max(1, height))
+        score = area_ratio * 100.0 + center_bias * 2.0 + min(aspect, 5.0) * 0.2
+        boxes.append((score, x, y, w, h))
+
+    boxes.sort(reverse=True)
+    regions = []
+    for index, (_, x, y, w, h) in enumerate(boxes[:4]):
+        pad_x = max(8, int(w * 0.18))
+        pad_y = max(6, int(h * 0.45))
+        regions.append((f'contour_plate_{index + 1}', x - pad_x, y - pad_y, x + w + pad_x, y + h + pad_y))
+    return regions
+
+
+def build_heuristic_regions(image):
+    if image is None:
+        return []
+
+    height, width = image.shape[:2]
+    regions = []
+    seen = set()
+
+    for label, x1, y1, x2, y2 in detect_candidate_plate_regions(image):
+        _append_region(regions, seen, label, image, x1, y1, x2, y2)
+
     boxes = [
-        ('lower_center', (0.12, 0.58, 0.88, 0.94)),
+        ('lower_center', (0.16, 0.56, 0.84, 0.92)),
         ('lower_wide', (0.08, 0.50, 0.92, 0.98)),
-        ('lower_mid', (0.18, 0.62, 0.84, 0.92)),
+        ('middle_lower', (0.12, 0.42, 0.88, 0.82)),
     ]
 
     for label, (left, top, right, bottom) in boxes:
-        x1 = max(0, int(width * left))
-        y1 = max(0, int(height * top))
-        x2 = min(width, int(width * right))
-        y2 = min(height, int(height * bottom))
-        if x2 - x1 < 40 or y2 - y1 < 20:
-            continue
-        regions.append((label, image[y1:y2, x1:x2]))
+        _append_region(regions, seen, label, image, width * left, height * top, width * right, height * bottom)
 
+    regions.append(('full', image))
     return regions
 
 
@@ -679,9 +758,34 @@ def detect_plate_region(image_path, image):
             'configured': True,
         }
 
+    image_h, image_w = image.shape[:2]
     boxes = results[0].boxes
-    best_idx = int(boxes.conf.argmax().item())
-    box = boxes[best_idx]
+    valid_boxes = []
+    for index, candidate_box in enumerate(boxes):
+        cx1, cy1, cx2, cy2 = [float(v) for v in candidate_box.xyxy[0].tolist()]
+        box_w = max(1.0, cx2 - cx1)
+        box_h = max(1.0, cy2 - cy1)
+        aspect = box_w / box_h
+        area_ratio = (box_w * box_h) / max(1.0, float(image_w * image_h))
+        confidence = float(candidate_box.conf[0].item())
+        if aspect < 1.8 or aspect > 8.0:
+            continue
+        if area_ratio < 0.0008 or area_ratio > 0.18:
+            continue
+        valid_boxes.append((confidence, -area_ratio, index, candidate_box))
+
+    if not valid_boxes:
+        return {
+            'bbox': None,
+            'confidence': None,
+            'crop': image,
+            'source': 'manual-review',
+            'reason': 'YOLO deteksiyası nömrə ölçüsünə uyğun deyil, heuristic OCR isledildi',
+            'configured': True,
+        }
+
+    valid_boxes.sort(reverse=True)
+    box = valid_boxes[0][3]
     xyxy = box.xyxy[0].tolist()
     x1, y1, x2, y2 = [int(v) for v in xyxy]
     pad_x = max(8, int((x2 - x1) * 0.12))
@@ -708,18 +812,31 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
     if image is None:
         return None
 
-    backends = ocr_backend_order()
-    regions = [("full", image)]
-    if image is not None and image.shape[1] > image.shape[0]:
-        regions.append(("lower_center", heuristic_plate_crop(image)))
-    regions = [(label, region) for label, region in regions if region is not None]
+    requested_backends = ocr_backend_order()
+    backend_order = [backend for backend in ('tesseract', 'paddle') if backend in requested_backends]
+    backend_order += [backend for backend in requested_backends if backend not in backend_order]
+    max_variants = max(1, int(os.environ.get('VEHICLE_OCR_MAX_VARIANTS', '2') or '2'))
+    max_regions = max(1, int(os.environ.get('VEHICLE_OCR_MAX_REGIONS', '2') or '2'))
+    early_accept = float(os.environ.get('VEHICLE_OCR_EARLY_ACCEPT_SCORE', str(AUTO_ACCEPT_MIN_OCR_SCORE)) or AUTO_ACCEPT_MIN_OCR_SCORE)
 
-    for backend in backends:
+    image_h, image_w = image.shape[:2]
+    image_aspect = image_w / max(1, image_h)
+    looks_like_plate_crop = image_aspect >= 1.8 and image_h <= 260
+
+    if looks_like_plate_crop:
+        # YOLO already returned a plate-shaped crop; try it before cutting it again.
+        regions = [('detected_plate', image)] + build_heuristic_regions(image)
+    else:
+        regions = build_heuristic_regions(image)
+
+    regions = [(label, region) for label, region in regions if region is not None][:max_regions]
+
+    for backend in backend_order:
         for region_label, region in regions:
             if region is None:
                 continue
 
-            variants = build_ocr_variants(region)[:3]
+            variants = build_ocr_variants(region)[:max_variants]
             for variant_index, variant in enumerate(variants):
                 if backend == 'paddle':
                     try:
@@ -730,8 +847,27 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
                     lines = iter_ocr_lines(ocr_result)
                     if not lines:
                         continue
-                    strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend))
-                    loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend))
+                    strict = extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend)
+                    loose = extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend)
+                    strict_candidates.extend(strict)
+                    loose_candidates.extend(loose)
+                    if strict:
+                        current_best = dedupe_candidates(strict_candidates)[0]
+                        if current_best.get('confidence', 0) >= early_accept:
+                            candidates = dedupe_candidates(strict_candidates + loose_candidates)
+                            best = candidates[0]
+                            return {
+                                'plate': best['plate'],
+                                'displayPlate': best['displayPlate'],
+                                'text': best['text'],
+                                'score': best['score'],
+                                'confidence': best['confidence'],
+                                'source': best['source'],
+                                'backend': best['backend'],
+                                'strictPlate': bool(best.get('strict')),
+                                'candidates': candidates[:5],
+                                'backendsTried': backend_order,
+                            }
                     continue
 
                 for ocr_config in tesseract_configs():
@@ -744,8 +880,27 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
                     if not lines:
                         continue
 
-                    strict_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend))
-                    loose_candidates.extend(extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend))
+                    strict = extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=True, backend=backend)
+                    loose = extract_candidates(lines, None, f'{backend}:{region_label}', f'{region_label}:{variant_index}', strict_only=False, backend=backend)
+                    strict_candidates.extend(strict)
+                    loose_candidates.extend(loose)
+                    if strict:
+                        current_best = dedupe_candidates(strict_candidates)[0]
+                        if current_best.get('confidence', 0) >= early_accept:
+                            candidates = dedupe_candidates(strict_candidates + loose_candidates)
+                            best = candidates[0]
+                            return {
+                                'plate': best['plate'],
+                                'displayPlate': best['displayPlate'],
+                                'text': best['text'],
+                                'score': best['score'],
+                                'confidence': best['confidence'],
+                                'source': best['source'],
+                                'backend': best['backend'],
+                                'strictPlate': bool(best.get('strict')),
+                                'candidates': candidates[:5],
+                                'backendsTried': backend_order,
+                            }
 
     candidates = dedupe_candidates(strict_candidates + loose_candidates)
     if not candidates:
@@ -762,7 +917,7 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
         'backend': best['backend'],
         'strictPlate': bool(best.get('strict')),
         'candidates': candidates[:5],
-        'backendsTried': backends,
+        'backendsTried': backend_order,
     }
 
 
@@ -819,26 +974,39 @@ def main():
         ocr_confidence = float(ocr_result.get('confidence') or 0.0)
         detector_ok = detector_confidence is not None and detector_confidence >= AUTO_ACCEPT_MIN_DET_SCORE
         strict_plate = bool(ocr_result.get('strictPlate'))
+        backend_name = ocr_result.get('backend') or selected_ocr_backend()
+        candidate_regions = [str(item.get('region') or '') for item in ocr_result.get('candidates', [])]
+        yolo_tesseract_strict_ok = bool(
+            backend_name == 'tesseract'
+            and detector_confidence is not None
+            and detector_confidence >= 0.60
+            and strict_plate
+            and any(region.startswith('detected_plate:') for region in candidate_regions)
+        )
+        ocr_ok = ocr_confidence >= AUTO_ACCEPT_MIN_OCR_SCORE or yolo_tesseract_strict_ok
+        effective_confidence = max(ocr_confidence, detector_confidence or 0.0) if yolo_tesseract_strict_ok else ocr_confidence
         auto_accept = bool(
             detector.get('configured', False)
             and detector.get('bbox')
             and detector_ok
-            and ocr_confidence >= AUTO_ACCEPT_MIN_OCR_SCORE
+            and ocr_ok
             and best_plate
             and strict_plate
         )
 
         manual_review_required = not auto_accept
         reason = None
-        if not detector.get('configured', False):
+        if not manual_review_required:
+            reason = None
+        elif not detector.get('configured', False):
             reason = 'YOLO modeli qurulmayib'
             manual_review_required = True
         elif not detector.get('bbox'):
             reason = detector.get('reason') or 'Nömrə üçün YOLO deteksiyası tapilmadi'
         elif not detector_ok:
             reason = 'YOLO confidence azdir'
-        elif ocr_confidence < AUTO_ACCEPT_MIN_OCR_SCORE:
-            reason = 'PaddleOCR confidence azdir'
+        elif not ocr_ok:
+            reason = 'OCR confidence azdir'
         elif best_plate and not strict_plate:
             reason = 'Strict regex namizəd tapilmadi'
         else:
@@ -850,7 +1018,7 @@ def main():
             'reason': reason,
             'plate': best_plate,
             'displayPlate': best_display_plate,
-            'confidence': ocr_confidence,
+            'confidence': round(effective_confidence, 4),
             'text': ocr_result['text'],
             'bbox': detector.get('bbox') if detector else None,
             'source': f"yolo+{ocr_result.get('backend') or selected_ocr_backend()}" if detector.get('bbox') else f"{ocr_result.get('backend') or selected_ocr_backend()}-review",

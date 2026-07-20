@@ -388,7 +388,7 @@ function DashboardAftoyuma() {
         <div style={vehiclePanel}>
           <div style={cameraPanel}>
             <Field label="Kamera screenshot">
-              <input type="file" accept="image/*" capture="environment" onChange={handleCaptureChange} style={controlStyle} />
+              <input type="file" accept="image/*" onChange={handleCaptureChange} style={controlStyle} />
             </Field>
             {captureImageDataUrl ? (
               <div style={previewCard}>
@@ -504,12 +504,49 @@ function Field({ label, children }) {
 }
 
 async function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Screenshot oxuna bilmədi.'));
-    reader.readAsDataURL(file);
-  });
+  const fallbackRead = () =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Screenshot oxuna bilmədi.'));
+      reader.readAsDataURL(file);
+    });
+
+  if (!file?.type?.startsWith('image/')) {
+    return fallbackRead();
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Screenshot oxuna bilmədi.'));
+      img.src = objectUrl;
+    });
+
+    const maxSide = 1600;
+    const width = image.naturalWidth || image.width || 0;
+    const height = image.naturalHeight || image.height || 0;
+    if (!width || !height) return fallbackRead();
+
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return fallbackRead();
+
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } catch {
+    return fallbackRead();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 const wrap = { display: 'grid', gap: '18px', maxWidth: '1120px', margin: '15px auto', padding: '0 15px 24px', color: theme.colors.text };

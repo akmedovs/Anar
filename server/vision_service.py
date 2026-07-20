@@ -37,13 +37,13 @@ def fail(message, code=1):
 
 
 def ocr_backend_order():
-    requested = os.environ.get("VEHICLE_OCR_BACKENDS", "easyocr,paddle,tesseract").strip().lower()
+    requested = os.environ.get("VEHICLE_OCR_BACKENDS", "tesseract").strip().lower()
     order = [item.strip() for item in requested.split(",") if item.strip()]
     normalized = []
     for backend in order:
         if backend in {"easyocr", "paddle", "tesseract"} and backend not in normalized:
             normalized.append(backend)
-    return normalized or ["easyocr", "paddle", "tesseract"]
+    return normalized or ["tesseract"]
 
 
 def tesseract_language():
@@ -143,21 +143,49 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
     if image is None:
         return None
 
-    backends = ocr_backend_order()
-    regions = [("full", image)]
-    if image is not None and len(image.shape) >= 2 and image.shape[1] > image.shape[0]:
-        regions.append(("lower_center", legacy.heuristic_plate_crop(image)))
-    regions = [(label, region) for label, region in regions if region is not None]
+    requested_backends = ocr_backend_order()
+    backend_order = [backend for backend in ("tesseract", "easyocr", "paddle") if backend in requested_backends]
+    backend_order += [backend for backend in requested_backends if backend not in backend_order]
+    max_variants = max(1, int(os.environ.get("VEHICLE_OCR_MAX_VARIANTS", "2") or "2"))
+    max_regions = max(1, int(os.environ.get("VEHICLE_OCR_MAX_REGIONS", "2") or "2"))
+    early_accept = float(os.environ.get("VEHICLE_OCR_EARLY_ACCEPT_SCORE", str(legacy.AUTO_ACCEPT_MIN_OCR_SCORE)) or legacy.AUTO_ACCEPT_MIN_OCR_SCORE)
+
+    image_h, image_w = image.shape[:2]
+    image_aspect = image_w / max(1, image_h)
+    looks_like_plate_crop = image_aspect >= 1.8 and image_h <= 260
+
+    if looks_like_plate_crop:
+        # YOLO already returned a plate-shaped crop; try it before cutting it again.
+        regions = [("detected_plate", image)] + legacy.build_heuristic_regions(image)
+    else:
+        regions = legacy.build_heuristic_regions(image)
+
+    regions = [(label, region) for label, region in regions if region is not None][:max_regions]
 
     strict_candidates = []
     loose_candidates = []
 
-    for backend in backends:
+    def make_result(candidates):
+        best = candidates[0]
+        return {
+            "plate": best["plate"],
+            "displayPlate": best["displayPlate"],
+            "text": best["text"],
+            "score": best["score"],
+            "confidence": best["confidence"],
+            "source": best["source"],
+            "backend": best["backend"],
+            "strictPlate": bool(best.get("strict")),
+            "candidates": candidates[:5],
+            "backendsTried": backend_order,
+        }
+
+    for backend in backend_order:
         for region_label, region in regions:
             if region is None:
                 continue
 
-            variants = legacy.build_ocr_variants(region)[:3]
+            variants = legacy.build_ocr_variants(region)[:max_variants]
             for variant_index, variant in enumerate(variants):
                 if backend == "easyocr":
                     try:
@@ -171,53 +199,47 @@ def run_multi_pass_ocr(image_path, image, cv2_module):
                         continue
                     lines = legacy.iter_ocr_lines(ocr_result)
                 else:
-                    try:
-                        ocr_result = legacy.run_tesseract_ocr(variant, config=None)
-                    except Exception:
-                        continue
-                    lines = legacy.iter_ocr_lines(ocr_result)
+                    tesseract_lines = []
+                    for ocr_config in legacy.tesseract_configs():
+                        try:
+                            ocr_result = legacy.run_tesseract_ocr(variant, config=ocr_config)
+                        except Exception:
+                            continue
+                        tesseract_lines.extend(legacy.iter_ocr_lines(ocr_result))
+                    lines = tesseract_lines
 
                 if not lines:
                     continue
 
-                strict_candidates.extend(
-                    legacy.extract_candidates(
-                        lines,
-                        None,
-                        f"{backend}:{region_label}",
-                        f"{region_label}:{variant_index}",
-                        strict_only=True,
-                        backend=backend,
-                    )
+                strict = legacy.extract_candidates(
+                    lines,
+                    None,
+                    f"{backend}:{region_label}",
+                    f"{region_label}:{variant_index}",
+                    strict_only=True,
+                    backend=backend,
                 )
-                loose_candidates.extend(
-                    legacy.extract_candidates(
-                        lines,
-                        None,
-                        f"{backend}:{region_label}",
-                        f"{region_label}:{variant_index}",
-                        strict_only=False,
-                        backend=backend,
-                    )
+                loose = legacy.extract_candidates(
+                    lines,
+                    None,
+                    f"{backend}:{region_label}",
+                    f"{region_label}:{variant_index}",
+                    strict_only=False,
+                    backend=backend,
                 )
+                strict_candidates.extend(strict)
+                loose_candidates.extend(loose)
+
+                if strict:
+                    current_best = legacy.dedupe_candidates(strict_candidates)[0]
+                    if current_best.get("confidence", 0) >= early_accept:
+                        return make_result(legacy.dedupe_candidates(strict_candidates + loose_candidates))
 
     candidates = legacy.dedupe_candidates(strict_candidates + loose_candidates)
     if not candidates:
         return None
 
-    best = candidates[0]
-    return {
-        "plate": best["plate"],
-        "displayPlate": best["displayPlate"],
-        "text": best["text"],
-        "score": best["score"],
-        "confidence": best["confidence"],
-        "source": best["source"],
-        "backend": best["backend"],
-        "strictPlate": bool(best.get("strict")),
-        "candidates": candidates[:5],
-        "backendsTried": backends,
-    }
+    return make_result(candidates)
 
 
 def build_payload(image_path, detector, ocr_result):
@@ -247,24 +269,37 @@ def build_payload(image_path, detector, ocr_result):
     ocr_confidence = float(ocr_result.get("confidence") or 0.0)
     detector_ok = detector_confidence is not None and detector_confidence >= legacy.AUTO_ACCEPT_MIN_DET_SCORE
     strict_plate = bool(ocr_result.get("strictPlate"))
+    backend_name = ocr_result.get("backend") or selected_ocr_backend()
+    candidate_regions = [str(item.get("region") or "") for item in ocr_result.get("candidates", [])]
+    yolo_tesseract_strict_ok = bool(
+        backend_name == "tesseract"
+        and detector_confidence is not None
+        and detector_confidence >= 0.60
+        and strict_plate
+        and any(region.startswith("detected_plate:") for region in candidate_regions)
+    )
+    ocr_ok = ocr_confidence >= legacy.AUTO_ACCEPT_MIN_OCR_SCORE or yolo_tesseract_strict_ok
+    effective_confidence = max(ocr_confidence, detector_confidence or 0.0) if yolo_tesseract_strict_ok else ocr_confidence
     auto_accept = bool(
         detector.get("configured", False)
         and detector_bbox
         and detector_ok
-        and ocr_confidence >= legacy.AUTO_ACCEPT_MIN_OCR_SCORE
+        and ocr_ok
         and best_plate
         and strict_plate
     )
 
     manual_review_required = not auto_accept
-    if not detector.get("configured", False):
+    if not manual_review_required:
+        reason = None
+    elif not detector.get("configured", False):
         reason = "YOLO modeli qurulmayib"
         manual_review_required = True
     elif not detector_bbox:
         reason = detector.get("reason") or "Nömrə üçün YOLO deteksiyası tapilmadi"
     elif not detector_ok:
         reason = "YOLO confidence azdir"
-    elif ocr_confidence < legacy.AUTO_ACCEPT_MIN_OCR_SCORE:
+    elif not ocr_ok:
         reason = "OCR confidence azdir"
     elif best_plate and not strict_plate:
         reason = "Strict regex namizəd tapilmadi"
@@ -277,7 +312,7 @@ def build_payload(image_path, detector, ocr_result):
         "reason": reason,
         "plate": best_plate,
         "displayPlate": best_display_plate,
-        "confidence": ocr_confidence,
+        "confidence": round(effective_confidence, 4),
         "text": ocr_result["text"],
         "bbox": detector_bbox,
         "source": f"yolo+{ocr_result.get('backend') or ocr_backend_order()[0]}" if detector_bbox else f"{ocr_result.get('backend') or ocr_backend_order()[0]}-review",

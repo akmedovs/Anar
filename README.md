@@ -9,6 +9,60 @@ Kirayə, Aftoyuma və admin idarəetməsi üçün React/Vite + Node.js + Postgre
 - Database: PostgreSQL
 - Opsional: vehicle recognition üçün ayrı `FastAPI` vision servisi və onun Docker image-i daxilindəki paketləri
 
+
+## Installation - Ubuntu serverdə 5 addım
+
+Aşağıdakı komandalar təmiz Ubuntu serverdə layihəni Docker ilə ayağa qaldırmaq üçündür.
+
+### 1. Sistem paketlərini yenilə və Docker quraşdır
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+### 2. Layihəni serverə çək
+
+```bash
+git clone https://github.com/akmedovs/Anar.git
+cd Anar
+```
+
+### 3. Environment faylını hazırla
+
+```bash
+cp .env.example .env
+```
+
+Lazımdırsa `.env` içində database və OCR dəyişənlərini dəyiş. Docker Compose default ayarlarla da işləyir.
+
+### 4. Proyekti build edib işə sal
+
+```bash
+docker compose up -d --build
+```
+
+### 5. Statusu yoxla
+
+```bash
+docker compose ps
+curl http://localhost:3001/api/health
+```
+
+Uğurlu cavab belə olmalıdır:
+
+```json
+{"ok":true,"database":"postgresql"}
+```
+
+Sayt: `http://SERVER_IP:5173`
+
 ## Docker ilə işə salma
 
 Ən sadə işə salma:

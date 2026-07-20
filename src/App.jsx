@@ -34,13 +34,13 @@ function Shell() {
   return (
     <div style={{ minHeight: '100vh', background: theme.colors.appBg }}>
       <header style={isMobile ? headerStyleMobile : headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={brandMark}>A</div>
+        <Link to="/dashboard" style={brandWrap}>
+          <img src="/akmedovs-logo.jpeg?v=20260720" alt="Akmedovs" style={brandLogo} />
           <div>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: theme.colors.text, letterSpacing: '0.01em' }}>Anar</div>
+            <div style={{ fontSize: '14px', fontWeight: 800, color: theme.colors.text, letterSpacing: '0.01em' }}>Akmedovs</div>
             <div style={{ fontSize: '12px', color: theme.colors.muted }}>Kirayə və Aftoyuma Sistemi</div>
           </div>
-        </div>
+        </Link>
 
         <button
           type="button"
@@ -230,16 +230,22 @@ const headerStyleMobile = {
   padding: '0 12px',
 };
 
-const brandMark = {
+const brandWrap = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  textDecoration: 'none',
+  minWidth: 0,
+};
+
+const brandLogo = {
   width: '38px',
   height: '38px',
   borderRadius: '11px',
-  background: `linear-gradient(135deg, ${theme.colors.primaryDark}, ${theme.colors.amber})`,
-  color: '#ffffff',
-  display: 'grid',
-  placeItems: 'center',
-  fontWeight: 800,
-  boxShadow: '0 10px 20px rgba(15, 118, 110, 0.18)',
+  objectFit: 'cover',
+  display: 'block',
+  border: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 10px 20px rgba(15, 23, 42, 0.08)',
 };
 
 const menuButton = {

@@ -1,7 +1,7 @@
 {
-  "name": "Gloss Garage Avtoyuma/Detailing",
-  "short_name": "Gloss Garage",
-  "description": "Gloss Garage Avtoyuma/Detailing",
+  "name": "Akmedovs Avtoyuma/Detailing",
+  "short_name": "Akmedovs",
+  "description": "Akmedovs Avtoyuma/Detailing",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,9 +10,9 @@
   "theme_color": "#1f2937",
   "icons": [
     {
-      "src": "/app-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/akmedovs-logo.jpeg",
+      "sizes": "1254x1254",
+      "type": "image/jpeg",
       "purpose": "any maskable"
     }
   ]
