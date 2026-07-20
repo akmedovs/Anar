@@ -20,10 +20,70 @@ import { theme } from './constants/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem(AUTH_STORAGE_KEY) === 'yes');
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <Router>
       <Shell />
     </Router>
+  );
+}
+
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const submitLogin = (event) => {
+    event.preventDefault();
+    if (username.trim() === LOGIN_USERNAME && password === LOGIN_PASSWORD) {
+      localStorage.setItem(AUTH_STORAGE_KEY, 'yes');
+      setError('');
+      onLogin();
+      return;
+    }
+    setError('İstifadəçi adı və ya şifrə yanlışdır.');
+  };
+
+  return (
+    <main style={loginPage}>
+      <form style={loginCard} onSubmit={submitLogin}>
+        <img src="/akmedovs-logo.jpeg?v=20260720" alt="Akmedovs" style={loginLogo} />
+        <div style={loginEyebrow}>Akmedovs</div>
+        <h1 style={loginTitle}>Sistemə giriş</h1>
+        <p style={loginSub}>Kirayə və Aftoyuma idarəetmə panelinə daxil ol.</p>
+
+        <label style={loginLabel}>
+          İstifadəçi adı
+          <input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            style={loginInput}
+            autoFocus
+          />
+        </label>
+
+        <label style={loginLabel}>
+          Şifrə
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            style={loginInput}
+          />
+        </label>
+
+        {error ? <div style={loginError}>{error}</div> : null}
+
+        <button type="submit" style={loginButton}>Daxil ol</button>
+      </form>
+    </main>
   );
 }
 
@@ -208,6 +268,48 @@ function MenuLink({ to, icon, children, active, onClick, meta = [] }) {
     </Link>
   );
 }
+
+const AUTH_STORAGE_KEY = 'akmedovs-auth';
+const LOGIN_USERNAME = 'akmedovs';
+const LOGIN_PASSWORD = '07570931017072aA!';
+
+const loginPage = {
+  minHeight: '100vh',
+  display: 'grid',
+  placeItems: 'center',
+  padding: '18px',
+  background: theme.colors.appBg,
+};
+
+const loginCard = {
+  width: '100%',
+  maxWidth: '390px',
+  padding: '26px',
+  borderRadius: '20px',
+  background: theme.colors.surface,
+  border: `1px solid ${theme.colors.border}`,
+  boxShadow: theme.shadow,
+  display: 'grid',
+  gap: '14px',
+  boxSizing: 'border-box',
+};
+
+const loginLogo = {
+  width: '68px',
+  height: '68px',
+  borderRadius: '18px',
+  objectFit: 'cover',
+  border: `1px solid ${theme.colors.border}`,
+  boxShadow: '0 14px 28px rgba(15, 23, 42, 0.10)',
+};
+
+const loginEyebrow = { fontSize: '12px', fontWeight: 900, color: theme.colors.primaryDark, letterSpacing: '0.12em', textTransform: 'uppercase' };
+const loginTitle = { margin: 0, color: theme.colors.text, fontSize: '26px', lineHeight: 1.1 };
+const loginSub = { margin: '-6px 0 4px', color: theme.colors.muted, fontSize: '13px', lineHeight: 1.5 };
+const loginLabel = { display: 'grid', gap: '6px', color: theme.colors.muted, fontSize: '13px', fontWeight: 800 };
+const loginInput = { width: '100%', padding: '13px 12px', borderRadius: '10px', border: `1px solid ${theme.colors.border}`, background: '#fff', color: theme.colors.text, fontSize: '15px', boxSizing: 'border-box' };
+const loginError = { padding: '10px 12px', borderRadius: '10px', background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '13px', fontWeight: 700 };
+const loginButton = { padding: '14px', borderRadius: '12px', border: 'none', background: theme.colors.primary, color: '#fff', fontWeight: 900, fontSize: '15px', cursor: 'pointer' };
 
 const headerStyle = {
   height: '64px',
