@@ -47,6 +47,18 @@ services:
       VEHICLE_OCR_MAX_REGIONS: 2
       VEHICLE_YOLO_MODEL: /app/server/models/yolov8-plate/weights/yolov8s.pt
       VEHICLE_YOLO_CONF: 0.25
+      AUTH_ADMIN_USERNAME: "${AUTH_ADMIN_USERNAME:-akmedovs}"
+      AUTH_ADMIN_PASSWORD: "${AUTH_ADMIN_PASSWORD:-07570931017072aA!}"
+      AUTH_ADMIN_EMAIL: "${AUTH_ADMIN_EMAIL:-}"
+      AUTH_JWT_SECRET: "${AUTH_JWT_SECRET:-change-this-secret}"
+      AUTH_TOKEN_TTL_SECONDS: "${AUTH_TOKEN_TTL_SECONDS:-604800}"
+      APP_PUBLIC_URL: "${APP_PUBLIC_URL:-http://192.168.25.150:5173}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_SECURE: "${SMTP_SECURE:-false}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
     volumes:
       - anar_uploads:/app/server/uploads
     ports:

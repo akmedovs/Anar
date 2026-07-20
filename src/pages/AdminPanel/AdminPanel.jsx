@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { reportsApi, washExpensesApi, washWaterApi } from '../../api/reports';
+import { authApi, reportsApi, washExpensesApi, washWaterApi } from '../../api/reports';
 import { aylar, cariIl, formatDateAz, formatMoney, localDateKey } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -24,6 +24,9 @@ function AdminPanel() {
     note: '',
   }));
   const [tenantHistory, setTenantHistory] = useState(loadTenantHistory);
+  const [users, setUsers] = useState([]);
+  const [userForm, setUserForm] = useState({ username: '', email: '', password: '', isAdmin: false });
+  const [passwordForm, setPasswordForm] = useState({});
 
   useEffect(() => {
     Promise.all([reportsApi.list({ il: year }), washWaterApi.list({ il: year }), washExpensesApi.list({ il: year })])
@@ -34,6 +37,18 @@ function AdminPanel() {
       })
       .catch((error) => setNotice(error.message));
   }, [year]);
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      setUsers(await authApi.listUsers());
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
 
   const editItems = useMemo(() => {
     const monthIndex = editMonth === 'Bütün Aylar' ? -1 : aylar.indexOf(editMonth);
@@ -119,6 +134,48 @@ function AdminPanel() {
       name: '',
       note: '',
     }));
+  };
+
+  const createAppUser = async (e) => {
+    e.preventDefault();
+    try {
+      await authApi.createUser(userForm);
+      setUserForm({ username: '', email: '', password: '', isAdmin: false });
+      await loadUsers();
+      setNotice('İstifadəçi yaradıldı.');
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const resetAppUserPassword = async (id) => {
+    const password = String(passwordForm[id] || '');
+    if (password.length < 8) {
+      setNotice('Yeni şifrə minimum 8 simvol olmalıdır.');
+      return;
+    }
+
+    try {
+      await authApi.resetUserPassword(id, { password });
+      setPasswordForm((prev) => ({ ...prev, [id]: '' }));
+      setNotice('Şifrə yeniləndi.');
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const toggleUserActive = async (user) => {
+    try {
+      await authApi.updateUser(user.id, {
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isActive: !user.isActive,
+      });
+      await loadUsers();
+      setNotice('İstifadəçi statusu yeniləndi.');
+    } catch (error) {
+      setNotice(error.message);
+    }
   };
 
   const openEditor = (type, item) => {
@@ -289,6 +346,61 @@ function AdminPanel() {
         <button type="button" onClick={saveSettings} style={button}>
           Yadda Saxla
         </button>
+      </section>
+
+      <section style={card}>
+        <div style={isMobile ? sectionHeadSimpleMobile : sectionHeadSimple}>
+          <div>
+            <div style={sectionEyebrow}>GİRİŞ SİSTEMİ</div>
+            <h2 style={sectionTitle}>İstifadəçilər və şifrə reset</h2>
+          </div>
+          <div style={sectionHint}>Admin yeni user yarada və şifrəni dəyişə bilər</div>
+        </div>
+
+        <form onSubmit={createAppUser} style={{ display: 'grid', gap: '12px', marginBottom: '14px' }}>
+          <Row isMobile={isMobile}>
+            <Field label="Username">
+              <input value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} style={inputStyle} />
+            </Field>
+            <Field label="Email">
+              <input type="email" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} style={inputStyle} />
+            </Field>
+            <Field label="Şifrə">
+              <input type="password" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} style={inputStyle} />
+            </Field>
+          </Row>
+          <label style={{ ...labelStyle, display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input type="checkbox" checked={userForm.isAdmin} onChange={(e) => setUserForm((prev) => ({ ...prev, isAdmin: e.target.checked }))} />
+            Admin icazəsi
+          </label>
+          <button type="submit" style={button}>İstifadəçi yarat</button>
+        </form>
+
+        <div style={listItems}>
+          {users.map((user) => (
+            <div key={user.id} style={listItem}>
+              <div style={isMobile ? listTopMobile : listTop}>
+                <strong>{user.username}</strong>
+                <span>{user.isAdmin ? 'Admin' : 'User'} · {user.isActive ? 'Aktiv' : 'Bağlı'}</span>
+              </div>
+              <div style={listMeta}>{user.email || 'Email yazılmayıb'}</div>
+              <Row isMobile={isMobile}>
+                <input
+                  type="password"
+                  placeholder="Yeni şifrə"
+                  value={passwordForm[user.id] || ''}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                  style={inputStyle}
+                />
+                <button type="button" onClick={() => resetAppUserPassword(user.id)} style={smallButton}>Şifrəni yenilə</button>
+                <button type="button" onClick={() => toggleUserActive(user)} style={{ ...smallButton, background: user.isActive ? '#b91c1c' : theme.colors.success }}>
+                  {user.isActive ? 'Bağla' : 'Aktiv et'}
+                </button>
+              </Row>
+            </div>
+          ))}
+          {!users.length && <div style={emptyBox}>İstifadəçi yoxdur.</div>}
+        </div>
       </section>
 
       <section style={editSection}>

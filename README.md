@@ -81,9 +81,31 @@ git pull origin main
 
 ```bash
 cp .env.example .env
+nano .env
 ```
 
-Docker Compose içində default PostgreSQL, Redis, API, Vision və Web ayarları hazırdır. Adi qurulum üçün `.env` dəyişmədən də başlamaq olar.
+Əsas production dəyərlərini dəyiş:
+
+```env
+AUTH_ADMIN_USERNAME=akmedovs
+AUTH_ADMIN_PASSWORD=BURADA_GUCLU_PAROL_YAZ
+AUTH_ADMIN_EMAIL=senin-email@example.com
+AUTH_JWT_SECRET=UZUN_RANDOM_SECRET_YAZ
+APP_PUBLIC_URL=http://SERVER_IP:5173
+```
+
+Şifrə reset linkinin emailə getməsi üçün SMTP ayarlarını da yaz:
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM="Akmedovs <your-email@gmail.com>"
+```
+
+SMTP boş olsa sistem işləyəcək, amma reset link emailə getməyəcək; link backend logunda görünəcək.
 
 ### 5. Proyekti build edib işə sal
 
@@ -124,6 +146,7 @@ Login səhifəsində project üçün təyin edilmiş istifadəçi adı və parol
 git clone https://github.com/akmedovs/Anar.git
 cd Anar
 cp .env.example .env
+nano .env
 docker compose up -d --build
 docker compose ps
 curl http://localhost:3001/api/health
@@ -208,6 +231,12 @@ cp .env.example .env
 - `VEHICLE_OCR_LANG` - OCR dili, default `en`
 - `VEHICLE_YOLO_MODEL` - plate detector modeli; boşdursa sistem manual review rejimində qalır
 - `VEHICLE_YOLO_CONF`
+- `AUTH_ADMIN_USERNAME` - ilk admin istifadəçi adı
+- `AUTH_ADMIN_PASSWORD` - ilk admin şifrəsi
+- `AUTH_ADMIN_EMAIL` - admin emaili; password reset üçün lazımdır
+- `AUTH_JWT_SECRET` - login token imzası üçün uzun random secret
+- `APP_PUBLIC_URL` - reset linklərində istifadə olunan sayt ünvanı
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` - mail reset üçün SMTP ayarları
 
 ## Yedəkləmə
 

@@ -1,12 +1,13 @@
 import http from 'node:http';
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHmac, createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getRecognitionQueue } from './recognition-queue.js';
 import { recognizeImageAtPath, saveCaptureImage as saveRecognitionCaptureImage } from './recognition-core.js';
 import pg from 'pg';
+import nodemailer from 'nodemailer';
 
 const { Pool } = pg;
 const envFile = path.resolve(process.cwd(), '.env');
@@ -46,6 +47,12 @@ const visionCommand = process.env.VEHICLE_VISION_COMMAND || 'python3';
 const visionModel = process.env.VEHICLE_YOLO_MODEL || '';
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
+const authJwtSecret = String(process.env.AUTH_JWT_SECRET || process.env.SESSION_SECRET || 'change-this-secret').trim();
+const authTokenTtlSeconds = Number(process.env.AUTH_TOKEN_TTL_SECONDS || 7 * 24 * 60 * 60);
+const appPublicUrl = String(process.env.APP_PUBLIC_URL || 'http://localhost:5173').trim().replace(/\/$/, '');
+const initialAdminUsername = String(process.env.AUTH_ADMIN_USERNAME || 'akmedovs').trim();
+const initialAdminPassword = String(process.env.AUTH_ADMIN_PASSWORD || '').trim();
+const initialAdminEmail = String(process.env.AUTH_ADMIN_EMAIL || '').trim();
 
 const monthOrder = [
   'Yanvar',
@@ -185,6 +192,8 @@ async function initializeDatabase() {
     await pool.query(statement);
   }
 
+  await ensureInitialAdminUser();
+
   const { rows: counts } = await pool.query(`
     SELECT
       (SELECT COUNT(*)::int FROM reports) AS reports_count,
@@ -306,6 +315,128 @@ function getPool() {
 
 async function query(sql, params = []) {
   return getPool().query(sql, params);
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(value).toString('base64url');
+}
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString('hex');
+  const key = scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt:${salt}:${key}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [scheme, salt, key] = String(storedHash || '').split(':');
+  if (scheme !== 'scrypt' || !salt || !key) return false;
+
+  const expected = Buffer.from(key, 'hex');
+  const actual = scryptSync(String(password), salt, 64);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function signAuthToken(user) {
+  const header = base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const now = Math.floor(Date.now() / 1000);
+  const payload = base64UrlEncode(JSON.stringify({
+    sub: String(user.id),
+    username: user.username,
+    isAdmin: Boolean(user.is_admin ?? user.isAdmin),
+    iat: now,
+    exp: now + authTokenTtlSeconds,
+  }));
+  const body = `${header}.${payload}`;
+  const signature = createHmac('sha256', authJwtSecret).update(body).digest('base64url');
+  return `${body}.${signature}`;
+}
+
+function verifyAuthToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+
+  const [header, payload, signature] = parts;
+  const expected = createHmac('sha256', authJwtSecret).update(`${header}.${payload}`).digest('base64url');
+  const given = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (given.length !== expectedBuffer.length || !timingSafeEqual(given, expectedBuffer)) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!parsed.exp || Number(parsed.exp) < Math.floor(Date.now() / 1000)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function tokenHash(token) {
+  return createHash('sha256').update(String(token)).digest('hex');
+}
+
+function userToResponse(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email || '',
+    isAdmin: Boolean(row.is_admin),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+  };
+}
+
+async function ensureInitialAdminUser() {
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM app_users');
+  if (Number(rows[0]?.count || 0) > 0) return;
+
+  const password = initialAdminPassword || randomBytes(18).toString('base64url');
+  await query(
+    `
+      INSERT INTO app_users (username, email, password_hash, is_admin, is_active)
+      VALUES ($1,$2,$3,true,true)
+    `,
+    [initialAdminUsername || 'admin', initialAdminEmail || null, hashPassword(password)],
+  );
+
+  if (!initialAdminPassword) {
+    console.warn(`[auth] Initial admin password generated for ${initialAdminUsername || 'admin'}: ${password}`);
+  }
+}
+
+async function getAuthUser(req) {
+  const authHeader = String(req.headers.authorization || '');
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+
+  const payload = verifyAuthToken(match[1]);
+  if (!payload?.sub) return null;
+
+  const result = await query(
+    'SELECT id, username, email, is_admin, is_active, created_at, updated_at FROM app_users WHERE id = $1 AND is_active = true',
+    [Number(payload.sub)],
+  );
+  return result.rows[0] || null;
+}
+
+async function requireAuth(req) {
+  const user = await getAuthUser(req);
+  if (!user) {
+    const error = new Error('Giriş tələb olunur.');
+    error.statusCode = 401;
+    throw error;
+  }
+  return user;
+}
+
+async function requireAdmin(req) {
+  const user = await requireAuth(req);
+  if (!user.is_admin) {
+    const error = new Error('Admin icazəsi tələb olunur.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return user;
 }
 
 function toNumber(value) {
@@ -749,6 +880,249 @@ async function confirmRecognitionJob(publicId, input) {
     job: recognitionJobToResponse(updated),
     event,
   };
+}
+
+async function loginUser(input) {
+  const username = String(input.username || '').trim();
+  const password = String(input.password || '');
+
+  if (!username || !password) {
+    const error = new Error('İstifadəçi adı və şifrə mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    'SELECT * FROM app_users WHERE lower(username) = lower($1) AND is_active = true',
+    [username],
+  );
+  const user = result.rows[0];
+
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    const error = new Error('İstifadəçi adı və ya şifrə yanlışdır.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  return {
+    ok: true,
+    token: signAuthToken(user),
+    user: userToResponse(user),
+  };
+}
+
+async function listUsers() {
+  const result = await query('SELECT id, username, email, is_admin, is_active, created_at, updated_at FROM app_users ORDER BY id ASC');
+  return result.rows.map(userToResponse);
+}
+
+async function createUser(input) {
+  const username = String(input.username || '').trim();
+  const email = String(input.email || '').trim().toLowerCase();
+  const password = String(input.password || '');
+
+  if (!username || password.length < 8) {
+    const error = new Error('İstifadəçi adı və minimum 8 simvollu şifrə mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    `
+      INSERT INTO app_users (username, email, password_hash, is_admin, is_active)
+      VALUES ($1,$2,$3,$4,$5)
+      RETURNING id, username, email, is_admin, is_active, created_at, updated_at
+    `,
+    [
+      username,
+      email || null,
+      hashPassword(password),
+      Boolean(input.isAdmin),
+      input.isActive === false ? false : true,
+    ],
+  ).catch((error) => {
+    if (error.code === '23505') {
+      const conflict = new Error('Bu username və ya email artıq istifadə olunur.');
+      conflict.statusCode = 409;
+      throw conflict;
+    }
+    throw error;
+  });
+
+  return userToResponse(result.rows[0]);
+}
+
+async function updateUser(userId, input) {
+  const id = Number(userId);
+  if (!id) {
+    const error = new Error('İstifadəçi id yanlışdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    `
+      UPDATE app_users
+      SET email = $1,
+          is_admin = $2,
+          is_active = $3,
+          updated_at = now()
+      WHERE id = $4
+      RETURNING id, username, email, is_admin, is_active, created_at, updated_at
+    `,
+    [
+      String(input.email || '').trim().toLowerCase() || null,
+      Boolean(input.isAdmin),
+      input.isActive === false ? false : true,
+      id,
+    ],
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error('İstifadəçi tapılmadı.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return userToResponse(result.rows[0]);
+}
+
+async function adminResetUserPassword(userId, input) {
+  const id = Number(userId);
+  const password = String(input.password || '');
+
+  if (!id || password.length < 8) {
+    const error = new Error('Yeni şifrə minimum 8 simvol olmalıdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    `
+      UPDATE app_users
+      SET password_hash = $1,
+          updated_at = now()
+      WHERE id = $2
+      RETURNING id, username, email, is_admin, is_active, created_at, updated_at
+    `,
+    [hashPassword(password), id],
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error('İstifadəçi tapılmadı.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return { ok: true, user: userToResponse(result.rows[0]) };
+}
+
+function smtpConfigured() {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_FROM);
+}
+
+async function sendPasswordResetMail(user, resetUrl) {
+  if (!smtpConfigured()) {
+    console.warn(`[auth] SMTP qurulmayıb. Reset link (${user.username}): ${resetUrl}`);
+    return { sent: false };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+    auth: process.env.SMTP_USER ? {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS || '',
+    } : undefined,
+  });
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
+    to: user.email,
+    subject: 'Akmedovs - şifrə yeniləmə',
+    text: `Şifrənizi yeniləmək üçün linki açın: ${resetUrl}\n\nBu link 1 saat qüvvədədir.`,
+    html: `
+      <p>Şifrənizi yeniləmək üçün aşağıdakı linki açın:</p>
+      <p><a href="${resetUrl}">${resetUrl}</a></p>
+      <p>Bu link 1 saat qüvvədədir.</p>
+    `,
+  });
+
+  return { sent: true };
+}
+
+async function requestPasswordReset(input) {
+  const identifier = String(input.email || input.username || '').trim();
+  if (!identifier) {
+    const error = new Error('Email və ya istifadəçi adı yazılmalıdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    `
+      SELECT id, username, email FROM app_users
+      WHERE is_active = true AND (lower(username) = lower($1) OR lower(email) = lower($1))
+      LIMIT 1
+    `,
+    [identifier],
+  );
+  const user = result.rows[0];
+
+  if (user?.email) {
+    const token = randomBytes(32).toString('base64url');
+    const resetUrl = `${appPublicUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    await query(
+      `
+        INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        VALUES ($1,$2,now() + interval '1 hour')
+      `,
+      [user.id, tokenHash(token)],
+    );
+    await sendPasswordResetMail(user, resetUrl);
+  }
+
+  return {
+    ok: true,
+    message: 'Əgər hesab tapıldısa, şifrə yeniləmə linki emailə göndərildi.',
+  };
+}
+
+async function resetPassword(input) {
+  const token = String(input.token || '').trim();
+  const password = String(input.password || '');
+
+  if (!token || password.length < 8) {
+    const error = new Error('Token və minimum 8 simvollu yeni şifrə mütləqdir.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await query(
+    `
+      SELECT prt.id, prt.user_id
+      FROM password_reset_tokens prt
+      JOIN app_users u ON u.id = prt.user_id
+      WHERE prt.token_hash = $1
+        AND prt.used_at IS NULL
+        AND prt.expires_at > now()
+        AND u.is_active = true
+      LIMIT 1
+    `,
+    [tokenHash(token)],
+  );
+  const resetRow = result.rows[0];
+  if (!resetRow) {
+    const error = new Error('Reset link yanlışdır və ya vaxtı bitib.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await query('UPDATE app_users SET password_hash = $1, updated_at = now() WHERE id = $2', [hashPassword(password), resetRow.user_id]);
+  await query('UPDATE password_reset_tokens SET used_at = now() WHERE id = $1', [resetRow.id]);
+
+  return { ok: true, message: 'Şifrə yeniləndi. Yeni şifrə ilə daxil ol.' };
 }
 
 async function streamRecognitionJobEvents(publicId, req, res) {
@@ -1546,7 +1920,7 @@ function sendJson(res, statusCode, payload) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   });
   res.end(JSON.stringify(payload));
 }
@@ -1595,6 +1969,10 @@ async function serveUpload(url, res) {
 
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  const authTokenParam = url.searchParams.get('access_token');
+  if (authTokenParam && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${authTokenParam}`;
+  }
 
   if (req.method === 'OPTIONS') {
     sendJson(res, 204, {});
@@ -1606,9 +1984,60 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (url.pathname === '/api/auth/login' && req.method === 'POST') {
+    sendJson(res, 200, await loginUser(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+    sendJson(res, 200, { ok: true, user: userToResponse(await requireAuth(req)) });
+    return;
+  }
+
+  if (url.pathname === '/api/auth/request-password-reset' && req.method === 'POST') {
+    sendJson(res, 200, await requestPasswordReset(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/auth/reset-password' && req.method === 'POST') {
+    sendJson(res, 200, await resetPassword(await readJson(req)));
+    return;
+  }
+
+  const authUsersPasswordMatch = url.pathname.match(/^\/api\/auth\/users\/(\d+)\/password$/);
+  const authUsersMatch = url.pathname.match(/^\/api\/auth\/users\/(\d+)$/);
+
+  if (url.pathname === '/api/auth/users' && req.method === 'GET') {
+    await requireAdmin(req);
+    sendJson(res, 200, await listUsers());
+    return;
+  }
+
+  if (url.pathname === '/api/auth/users' && req.method === 'POST') {
+    await requireAdmin(req);
+    sendJson(res, 201, await createUser(await readJson(req)));
+    return;
+  }
+
+  if (authUsersMatch && req.method === 'PUT') {
+    await requireAdmin(req);
+    sendJson(res, 200, await updateUser(authUsersMatch[1], await readJson(req)));
+    return;
+  }
+
+  if (authUsersPasswordMatch && req.method === 'POST') {
+    await requireAdmin(req);
+    sendJson(res, 200, await adminResetUserPassword(authUsersPasswordMatch[1], await readJson(req)));
+    return;
+  }
+
   if (url.pathname.startsWith('/uploads/')) {
     const served = await serveUpload(url, res);
     if (served) return;
+  }
+
+  if (url.pathname.startsWith('/api/')) {
+    await requireAuth(req);
   }
 
   if (url.pathname === '/api/reports' && req.method === 'GET') {

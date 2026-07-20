@@ -1,10 +1,12 @@
 async function request(path, options = {}) {
   let response;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('akmedovs-token') : '';
 
   try {
     response = await fetch(path, {
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
       ...options,
@@ -22,6 +24,51 @@ async function request(path, options = {}) {
 
   return data;
 }
+
+export const authApi = {
+  login(credentials) {
+    return request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(credentials),
+    });
+  },
+  me() {
+    return request('/api/auth/me');
+  },
+  requestPasswordReset(payload) {
+    return request('/api/auth/request-password-reset', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  resetPassword(payload) {
+    return request('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  listUsers() {
+    return request('/api/auth/users');
+  },
+  createUser(payload) {
+    return request('/api/auth/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateUser(id, payload) {
+    return request(`/api/auth/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+  resetUserPassword(id, payload) {
+    return request(`/api/auth/users/${id}/password`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+};
 
 function parseJson(raw) {
   try {

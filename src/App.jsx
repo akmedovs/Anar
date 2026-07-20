@@ -12,23 +12,56 @@
 // }
 
 // export default App
-import { Component, useState } from 'react';
+import { Component, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Link, useLocation } from 'react-router-dom';
 import { FiMenu, FiX, FiLayout, FiTable, FiDroplet, FiSettings, FiEdit3, FiStar, FiPieChart, FiTag } from 'react-icons/fi';
 import AppRoutes from './routes';
 import { theme } from './constants/theme';
 import { useIsMobile } from './hooks/useIsMobile';
+import { authApi } from './api/reports';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem(AUTH_STORAGE_KEY) === 'yes');
+  const [auth, setAuth] = useState(() => loadAuth());
+  const [checkingAuth, setCheckingAuth] = useState(Boolean(loadAuth().token));
+  const isResetPage = typeof window !== 'undefined' && window.location.pathname === '/reset-password';
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
+  useEffect(() => {
+    const current = loadAuth();
+    if (!current.token) {
+      setCheckingAuth(false);
+      return;
+    }
+
+    authApi.me()
+      .then((result) => {
+        saveAuth(current.token, result.user);
+        setAuth({ token: current.token, user: result.user });
+      })
+      .catch(() => {
+        clearAuth();
+        setAuth({ token: '', user: null });
+      })
+      .finally(() => setCheckingAuth(false));
+  }, []);
+
+  if (isResetPage) {
+    return <ResetPasswordScreen />;
+  }
+
+  if (checkingAuth) {
+    return <main style={loginPage}><div style={loginCard}>Giriş yoxlanılır...</div></main>;
+  }
+
+  if (!auth.token) {
+    return <LoginScreen onLogin={(nextAuth) => setAuth(nextAuth)} />;
   }
 
   return (
     <Router>
-      <Shell />
+      <Shell user={auth.user} onLogout={() => {
+        clearAuth();
+        setAuth({ token: '', user: null });
+      }} />
     </Router>
   );
 }
@@ -36,58 +69,164 @@ function App() {
 function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [resetIdentifier, setResetIdentifier] = useState('');
+  const [showReset, setShowReset] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const submitLogin = (event) => {
+  const submitLogin = async (event) => {
     event.preventDefault();
-    if (username.trim() === LOGIN_USERNAME && password === LOGIN_PASSWORD) {
-      localStorage.setItem(AUTH_STORAGE_KEY, 'yes');
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const result = await authApi.login({ username, password });
+      saveAuth(result.token, result.user);
       setError('');
-      onLogin();
-      return;
+      onLogin({ token: result.token, user: result.user });
+    } catch (authError) {
+      setError(authError.message);
+    } finally {
+      setLoading(false);
     }
-    setError('İstifadəçi adı və ya şifrə yanlışdır.');
+  };
+
+  const submitReset = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const result = await authApi.requestPasswordReset({ email: resetIdentifier, username: resetIdentifier });
+      setMessage(result.message || 'Reset link göndərildi.');
+    } catch (resetError) {
+      setError(resetError.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <main style={loginPage}>
-      <form style={loginCard} onSubmit={submitLogin}>
+      <form style={loginCard} onSubmit={showReset ? submitReset : submitLogin}>
         <img src="/akmedovs-logo.jpeg?v=20260720" alt="Akmedovs" style={loginLogo} />
         <div style={loginEyebrow}>Akmedovs</div>
-        <h1 style={loginTitle}>Sistemə giriş</h1>
-        <p style={loginSub}>Kirayə və Aftoyuma idarəetmə panelinə daxil ol.</p>
+        <h1 style={loginTitle}>{showReset ? 'Şifrəni yenilə' : 'Sistemə giriş'}</h1>
+        <p style={loginSub}>{showReset ? 'Email və ya istifadəçi adını yaz, reset linki göndərilsin.' : 'Kirayə və Aftoyuma idarəetmə panelinə daxil ol.'}</p>
 
-        <label style={loginLabel}>
-          İstifadəçi adı
-          <input
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
-            style={loginInput}
-            autoFocus
-          />
-        </label>
+        {showReset ? (
+          <label style={loginLabel}>
+            Email və ya istifadəçi adı
+            <input
+              value={resetIdentifier}
+              onChange={(event) => setResetIdentifier(event.target.value)}
+              autoComplete="username"
+              style={loginInput}
+              autoFocus
+            />
+          </label>
+        ) : (
+          <>
+            <label style={loginLabel}>
+              İstifadəçi adı
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                style={loginInput}
+                autoFocus
+              />
+            </label>
 
-        <label style={loginLabel}>
-          Şifrə
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            style={loginInput}
-          />
-        </label>
+            <label style={loginLabel}>
+              Şifrə
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                style={loginInput}
+              />
+            </label>
+          </>
+        )}
 
         {error ? <div style={loginError}>{error}</div> : null}
+        {message ? <div style={loginSuccess}>{message}</div> : null}
 
-        <button type="submit" style={loginButton}>Daxil ol</button>
+        <button type="submit" style={loginButton} disabled={loading}>{loading ? 'Gözlə...' : showReset ? 'Reset link göndər' : 'Daxil ol'}</button>
+        <button type="button" style={linkButton} onClick={() => {
+          setShowReset((value) => !value);
+          setError('');
+          setMessage('');
+        }}>
+          {showReset ? 'Girişə qayıt' : 'Şifrəni unutdum'}
+        </button>
       </form>
     </main>
   );
 }
 
-function Shell() {
+function ResetPasswordScreen() {
+  const token = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') || '' : '';
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    if (password !== confirmPassword) {
+      setError('Şifrələr eyni deyil.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await authApi.resetPassword({ token, password });
+      setMessage(result.message || 'Şifrə yeniləndi.');
+    } catch (resetError) {
+      setError(resetError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main style={loginPage}>
+      <form style={loginCard} onSubmit={submit}>
+        <img src="/akmedovs-logo.jpeg?v=20260720" alt="Akmedovs" style={loginLogo} />
+        <div style={loginEyebrow}>Akmedovs</div>
+        <h1 style={loginTitle}>Yeni şifrə</h1>
+        <p style={loginSub}>Yeni şifrə minimum 8 simvol olmalıdır.</p>
+
+        <label style={loginLabel}>
+          Yeni şifrə
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} style={loginInput} autoComplete="new-password" autoFocus />
+        </label>
+        <label style={loginLabel}>
+          Yeni şifrə təkrar
+          <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} style={loginInput} autoComplete="new-password" />
+        </label>
+
+        {error ? <div style={loginError}>{error}</div> : null}
+        {message ? <div style={loginSuccess}>{message}</div> : null}
+
+        <button type="submit" style={loginButton} disabled={loading}>{loading ? 'Yenilənir...' : 'Şifrəni yenilə'}</button>
+        <a href="/" style={{ ...linkButton, textAlign: 'center', textDecoration: 'none' }}>Girişə qayıt</a>
+      </form>
+    </main>
+  );
+}
+
+function Shell({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
 
@@ -112,7 +251,7 @@ function Shell() {
         </button>
       </header>
 
-      <SideMenu open={open} onClose={() => setOpen(false)} />
+      <SideMenu open={open} onClose={() => setOpen(false)} user={user} onLogout={onLogout} />
 
       <main style={isMobile ? mainStyleMobile : mainStyle}>
         <RouteBoundary>
@@ -158,7 +297,7 @@ class RouteBoundary extends Component {
   }
 }
 
-function SideMenu({ open, onClose }) {
+function SideMenu({ open, onClose, user, onLogout }) {
   const location = useLocation();
   const isMobile = useIsMobile();
 
@@ -226,6 +365,12 @@ function SideMenu({ open, onClose }) {
             AdminPanel
           </MenuLink>
         </nav>
+        <div style={{ marginTop: 'auto', padding: '12px', borderTop: `1px solid ${theme.colors.border}` }}>
+          <div style={{ fontSize: '12px', color: theme.colors.muted, marginBottom: '8px' }}>
+            Daxil olub: <strong>{user?.username || 'user'}</strong>
+          </div>
+          <button type="button" onClick={() => { onClose(); onLogout(); }} style={logoutButton}>Çıxış</button>
+        </div>
       </aside>
     </>
   );
@@ -269,9 +414,34 @@ function MenuLink({ to, icon, children, active, onClick, meta = [] }) {
   );
 }
 
-const AUTH_STORAGE_KEY = 'akmedovs-auth';
-const LOGIN_USERNAME = 'akmedovs';
-const LOGIN_PASSWORD = '07570931017072aA!';
+const AUTH_TOKEN_KEY = 'akmedovs-token';
+const AUTH_USER_KEY = 'akmedovs-user';
+
+function loadAuth() {
+  if (typeof window === 'undefined') return { token: '', user: null };
+
+  const token = localStorage.getItem(AUTH_TOKEN_KEY) || '';
+  let user = null;
+  try {
+    user = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
+  } catch {
+    user = null;
+  }
+
+  return { token, user };
+}
+
+function saveAuth(token, user) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user || null));
+  localStorage.removeItem('akmedovs-auth');
+}
+
+function clearAuth() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
+  localStorage.removeItem('akmedovs-auth');
+}
 
 const loginPage = {
   minHeight: '100vh',
@@ -309,7 +479,9 @@ const loginSub = { margin: '-6px 0 4px', color: theme.colors.muted, fontSize: '1
 const loginLabel = { display: 'grid', gap: '6px', color: theme.colors.muted, fontSize: '13px', fontWeight: 800 };
 const loginInput = { width: '100%', padding: '13px 12px', borderRadius: '10px', border: `1px solid ${theme.colors.border}`, background: '#fff', color: theme.colors.text, fontSize: '15px', boxSizing: 'border-box' };
 const loginError = { padding: '10px 12px', borderRadius: '10px', background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '13px', fontWeight: 700 };
+const loginSuccess = { padding: '10px 12px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #bbf7d0', color: '#166534', fontSize: '13px', fontWeight: 700 };
 const loginButton = { padding: '14px', borderRadius: '12px', border: 'none', background: theme.colors.primary, color: '#fff', fontWeight: 900, fontSize: '15px', cursor: 'pointer' };
+const linkButton = { border: 'none', background: 'transparent', color: theme.colors.primaryDark, fontWeight: 900, fontSize: '13px', cursor: 'pointer', padding: '4px' };
 
 const headerStyle = {
   height: '64px',
@@ -375,6 +547,17 @@ const closeButton = {
   color: theme.colors.text,
   display: 'grid',
   placeItems: 'center',
+  cursor: 'pointer',
+};
+
+const logoutButton = {
+  width: '100%',
+  padding: '12px',
+  borderRadius: '12px',
+  border: `1px solid ${theme.colors.border}`,
+  background: '#fff',
+  color: theme.colors.text,
+  fontWeight: 900,
   cursor: 'pointer',
 };
 

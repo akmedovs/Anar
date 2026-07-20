@@ -247,7 +247,11 @@ function DashboardAftoyuma() {
         captureUrl: result.captureUrl,
       });
 
-      const source = new window.EventSource(`/api/recognition-jobs/${jobId}/events`);
+      const token = localStorage.getItem('akmedovs-token') || '';
+      const eventUrl = token
+        ? `/api/recognition-jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`
+        : `/api/recognition-jobs/${jobId}/events`;
+      const source = new window.EventSource(eventUrl);
       recognitionStreamRef.current = source;
 
       source.addEventListener('job', (message) => {
