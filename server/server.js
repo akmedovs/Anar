@@ -1110,11 +1110,11 @@ function smtpConfigured(settings) {
   return Boolean(settings.smtpHost && settings.smtpPort && settings.smtpFrom);
 }
 
-async function sendPasswordResetMail(user, resetUrl) {
-  const settings = await getMailSettings();
+async function sendMailWithSettings(settings, message) {
   if (!smtpConfigured(settings)) {
-    console.warn(`[auth] SMTP qurulmayıb. Reset link (${user.username}): ${resetUrl}`);
-    return { sent: false };
+    const error = new Error('SMTP host, port və From yazılmalıdır.');
+    error.statusCode = 400;
+    throw error;
   }
 
   const transporter = nodemailer.createTransport({
@@ -1129,6 +1129,20 @@ async function sendPasswordResetMail(user, resetUrl) {
 
   await transporter.sendMail({
     from: settings.smtpFrom,
+    ...message,
+  });
+
+  return { sent: true };
+}
+
+async function sendPasswordResetMail(user, resetUrl) {
+  const settings = await getMailSettings();
+  if (!smtpConfigured(settings)) {
+    console.warn(`[auth] SMTP qurulmayıb. Reset link (${user.username}): ${resetUrl}`);
+    return { sent: false };
+  }
+
+  return sendMailWithSettings(settings, {
     to: user.email,
     subject: 'Akmedovs - şifrə yeniləmə',
     text: `Şifrənizi yeniləmək üçün linki açın: ${resetUrl}\n\nBu link 1 saat qüvvədədir.`,
@@ -1138,8 +1152,35 @@ async function sendPasswordResetMail(user, resetUrl) {
       <p>Bu link 1 saat qüvvədədir.</p>
     `,
   });
+}
 
-  return { sent: true };
+async function testMailSettings(input) {
+  const current = await getMailSettings();
+  const settings = {
+    smtpHost: String(input.smtpHost ?? current.smtpHost).trim(),
+    smtpPort: String((input.smtpPort ?? current.smtpPort) || '587').trim(),
+    smtpSecure: Boolean(input.smtpSecure),
+    smtpUser: String(input.smtpUser ?? current.smtpUser).trim(),
+    smtpPass: input.smtpPass === undefined || String(input.smtpPass) === '' ? current.smtpPass : String(input.smtpPass),
+    smtpFrom: String(input.smtpFrom ?? current.smtpFrom).trim(),
+    appPublicUrl: String(input.appPublicUrl ?? current.appPublicUrl).trim().replace(/\/$/, ''),
+  };
+  const to = String(input.testEmail || input.email || settings.smtpUser || settings.smtpFrom || '').trim();
+
+  if (!to) {
+    const error = new Error('Test email ünvanı yazılmalıdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await sendMailWithSettings(settings, {
+    to,
+    subject: 'Akmedovs - SMTP test',
+    text: 'Mail ayarları işləyir. Bu test mesajıdır.',
+    html: '<p>Mail ayarları işləyir.</p><p>Bu test mesajıdır.</p>',
+  });
+
+  return { ok: true, message: `Test email göndərildi: ${to}` };
 }
 
 async function requestPasswordReset(input) {
@@ -2131,6 +2172,12 @@ async function handleRequest(req, res) {
   if (url.pathname === '/api/settings/mail' && req.method === 'PUT') {
     await requireAdmin(req);
     sendJson(res, 200, await updateMailSettings(await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/settings/mail/test' && req.method === 'POST') {
+    await requireAdmin(req);
+    sendJson(res, 200, await testMailSettings(await readJson(req)));
     return;
   }
 

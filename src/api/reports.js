@@ -80,6 +80,12 @@ export const settingsApi = {
       body: JSON.stringify(payload),
     });
   },
+  testMailSettings(payload) {
+    return request('/api/settings/mail/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 function parseJson(raw) {

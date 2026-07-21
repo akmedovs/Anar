@@ -28,6 +28,7 @@ function AdminPanel() {
   const [userForm, setUserForm] = useState({ username: '', email: '', password: '', isAdmin: false });
   const [passwordForm, setPasswordForm] = useState({});
   const [mailDraft, setMailDraft] = useState(defaultMailSettings);
+  const [mailTestEmail, setMailTestEmail] = useState('');
 
   useEffect(() => {
     Promise.all([reportsApi.list({ il: year }), washWaterApi.list({ il: year }), washExpensesApi.list({ il: year })])
@@ -55,6 +56,7 @@ function AdminPanel() {
         ...(result.settings || {}),
         smtpPass: '',
       });
+      setMailTestEmail(result.settings?.smtpUser || result.settings?.smtpFrom || '');
     } catch (error) {
       setNotice(error.message);
     }
@@ -137,6 +139,16 @@ function AdminPanel() {
     }
   };
 
+  const testMailSettings = async () => {
+    try {
+      const result = await settingsApi.testMailSettings({ ...mailDraft, testEmail: mailTestEmail });
+      setNotice(result.message || 'Test email göndərildi.');
+      window.alert(result.message || 'Test email göndərildi.');
+    } catch (error) {
+      setNotice(`Test email göndərilmədi: ${error.message}`);
+    }
+  };
+
   const inferSuNefer = (item) => {
     const stored = Number(item?.suNefer ?? item?.su_nefer);
     if (Number.isFinite(stored) && stored > 0) return stored;
@@ -175,6 +187,13 @@ function AdminPanel() {
 
   const createAppUser = async (e) => {
     e.preventDefault();
+    const username = String(userForm.username || '').trim();
+    const password = String(userForm.password || '');
+    if (!username || password.length < 8) {
+      setNotice('Username və minimum 8 simvollu şifrə yaz.');
+      return;
+    }
+
     try {
       await authApi.createUser(userForm);
       setUserForm({ username: '', email: '', password: '', isAdmin: false });
@@ -394,7 +413,7 @@ function AdminPanel() {
           <div style={sectionHint}>{mailDraft.smtpPassSet ? 'SMTP şifrəsi saxlanılıb' : 'SMTP şifrəsi hələ saxlanılmayıb'}</div>
         </div>
 
-        <form onSubmit={saveMailSettings} style={{ display: 'grid', gap: '12px' }}>
+        <form onSubmit={saveMailSettings} style={panelForm}>
           <div style={isMobile ? gridMobile : grid}>
             <Field label="SMTP host">
               <input name="smtpHost" value={mailDraft.smtpHost} onChange={handleMailChange} style={inputStyle} placeholder="smtp.gmail.com" />
@@ -430,7 +449,15 @@ function AdminPanel() {
             Secure SMTP
           </label>
 
-          <button type="submit" style={button}>Mail ayarlarını saxla</button>
+          <div style={isMobile ? testBarMobile : testBar}>
+            <Field label="Test email">
+              <input type="email" value={mailTestEmail} onChange={(e) => setMailTestEmail(e.target.value)} style={inputStyle} placeholder="mail@example.com" />
+            </Field>
+            <div style={actionButtons}>
+              <button type="submit" style={button}>Saxla</button>
+              <button type="button" onClick={testMailSettings} style={secondaryButton}>Test göndər</button>
+            </div>
+          </div>
         </form>
       </section>
 
@@ -443,49 +470,61 @@ function AdminPanel() {
           <div style={sectionHint}>Admin yeni user yarada və şifrəni dəyişə bilər</div>
         </div>
 
-        <form onSubmit={createAppUser} style={{ display: 'grid', gap: '12px', marginBottom: '14px' }}>
-          <Row isMobile={isMobile}>
+        <div style={isMobile ? userManageGridMobile : userManageGrid}>
+          <form onSubmit={createAppUser} style={subPanel}>
+            <div>
+              <div style={sectionEyebrow}>YENİ İSTİFADƏÇİ</div>
+              <h3 style={sectionTitleSmall}>Hesab yarat</h3>
+            </div>
             <Field label="Username">
-              <input value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} style={inputStyle} />
+              <input value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} style={inputStyle} autoComplete="username" />
             </Field>
             <Field label="Email">
-              <input type="email" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} style={inputStyle} />
+              <input type="email" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} style={inputStyle} autoComplete="email" />
             </Field>
-            <Field label="Şifrə">
-              <input type="password" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} style={inputStyle} />
+            <Field label="İlkin şifrə">
+              <input type="password" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} style={inputStyle} autoComplete="new-password" />
+              <div style={fieldHint}>Minimum 8 simvol.</div>
             </Field>
-          </Row>
-          <label style={{ ...labelStyle, display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <input type="checkbox" checked={userForm.isAdmin} onChange={(e) => setUserForm((prev) => ({ ...prev, isAdmin: e.target.checked }))} />
-            Admin icazəsi
-          </label>
-          <button type="submit" style={button}>İstifadəçi yarat</button>
-        </form>
+            <label style={checkLabel}>
+              <input type="checkbox" checked={userForm.isAdmin} onChange={(e) => setUserForm((prev) => ({ ...prev, isAdmin: e.target.checked }))} />
+              Admin icazəsi
+            </label>
+            <button type="submit" style={button}>İstifadəçi yarat</button>
+          </form>
 
-        <div style={listItems}>
+          <div style={subPanel}>
+            <div>
+              <div style={sectionEyebrow}>MÖVCUD İSTİFADƏÇİLƏR</div>
+              <h3 style={sectionTitleSmall}>Şifrə və status</h3>
+            </div>
+            <div style={listItems}>
           {users.map((user) => (
             <div key={user.id} style={listItem}>
               <div style={isMobile ? listTopMobile : listTop}>
                 <strong>{user.username}</strong>
-                <span>{user.isAdmin ? 'Admin' : 'User'} · {user.isActive ? 'Aktiv' : 'Bağlı'}</span>
+                <span style={userBadge}>{user.isAdmin ? 'Admin' : 'User'} · {user.isActive ? 'Aktiv' : 'Bağlı'}</span>
               </div>
               <div style={listMeta}>{user.email || 'Email yazılmayıb'}</div>
-              <Row isMobile={isMobile}>
+              <div style={isMobile ? userActionRowMobile : userActionRow}>
                 <input
                   type="password"
                   placeholder="Yeni şifrə"
                   value={passwordForm[user.id] || ''}
                   onChange={(e) => setPasswordForm((prev) => ({ ...prev, [user.id]: e.target.value }))}
                   style={inputStyle}
+                  autoComplete="new-password"
                 />
-                <button type="button" onClick={() => resetAppUserPassword(user.id)} style={smallButton}>Şifrəni yenilə</button>
+                <button type="button" onClick={() => resetAppUserPassword(user.id)} style={smallButton}>Yenilə</button>
                 <button type="button" onClick={() => toggleUserActive(user)} style={{ ...smallButton, background: user.isActive ? '#b91c1c' : theme.colors.success }}>
                   {user.isActive ? 'Bağla' : 'Aktiv et'}
                 </button>
-              </Row>
+              </div>
             </div>
           ))}
           {!users.length && <div style={emptyBox}>İstifadəçi yoxdur.</div>}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -870,6 +909,17 @@ const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border
 const fieldHint = { marginTop: '5px', fontSize: '12px', color: theme.colors.muted, lineHeight: 1.35 };
 const checkLabel = { ...labelStyle, display: 'flex', gap: '8px', alignItems: 'center', marginBottom: 0 };
 const button = { padding: '15px', background: theme.colors.success, color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '15px' };
+const secondaryButton = { ...button, background: theme.colors.primary };
+const panelForm = { display: 'grid', gap: '12px' };
+const testBar = { display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto', gap: '12px', alignItems: 'end', paddingTop: '4px' };
+const testBarMobile = { ...testBar, gridTemplateColumns: '1fr' };
+const actionButtons = { display: 'flex', gap: '10px', flexWrap: 'wrap' };
+const userManageGrid = { display: 'grid', gridTemplateColumns: 'minmax(260px, 360px) minmax(0, 1fr)', gap: '14px', alignItems: 'start' };
+const userManageGridMobile = { ...userManageGrid, gridTemplateColumns: '1fr' };
+const subPanel = { display: 'grid', gap: '12px', padding: '14px', borderRadius: '12px', background: '#f8fafc', border: `1px solid ${theme.colors.border}` };
+const userActionRow = { display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) auto auto', gap: '8px', alignItems: 'center' };
+const userActionRowMobile = { ...userActionRow, gridTemplateColumns: '1fr' };
+const userBadge = { fontSize: '12px', fontWeight: 700, color: theme.colors.muted };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const rowStyleMobile = { ...rowStyle, gridTemplateColumns: '1fr' };
 const sectionHeadSimple = { display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '14px' };
