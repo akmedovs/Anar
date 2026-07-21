@@ -75,15 +75,23 @@ export const settingsApi = {
     return request('/api/settings/mail');
   },
   updateMailSettings(payload) {
+    const nextPayload = { ...payload };
+    if (String(nextPayload.smtpPass || '').trim() === '') {
+      delete nextPayload.smtpPass;
+    }
     return request('/api/settings/mail', {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(nextPayload),
     });
   },
   testMailSettings(payload) {
+    const nextPayload = { ...payload };
+    if (String(nextPayload.smtpPass || '').trim() === '') {
+      delete nextPayload.smtpPass;
+    }
     return request('/api/settings/mail/test', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(nextPayload),
     });
   },
 };

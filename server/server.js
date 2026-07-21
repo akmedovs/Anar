@@ -407,6 +407,13 @@ function mailSettingsToResponse(settings) {
   };
 }
 
+function nextSmtpPassword(inputPassword, currentPassword) {
+  if (inputPassword === undefined || inputPassword === null || String(inputPassword).trim() === '') {
+    return currentPassword;
+  }
+  return String(inputPassword);
+}
+
 async function getMailSettings() {
   const settings = defaultMailSettings();
   const { rows } = await query('SELECT key, value FROM system_settings WHERE key = ANY($1)', [mailSettingKeys]);
@@ -431,7 +438,7 @@ async function updateMailSettings(input) {
     smtpPort: String(input.smtpPort ?? '587').trim(),
     smtpSecure: Boolean(input.smtpSecure),
     smtpUser: String(input.smtpUser ?? '').trim(),
-    smtpPass: input.smtpPass === undefined || String(input.smtpPass) === '' ? current.smtpPass : String(input.smtpPass),
+    smtpPass: nextSmtpPassword(input.smtpPass, current.smtpPass),
     smtpFrom: String(input.smtpFrom ?? '').trim(),
     appPublicUrl: String(input.appPublicUrl ?? appPublicUrl).trim().replace(/\/$/, ''),
   };
@@ -1161,7 +1168,7 @@ async function testMailSettings(input) {
     smtpPort: String((input.smtpPort ?? current.smtpPort) || '587').trim(),
     smtpSecure: Boolean(input.smtpSecure),
     smtpUser: String(input.smtpUser ?? current.smtpUser).trim(),
-    smtpPass: input.smtpPass === undefined || String(input.smtpPass) === '' ? current.smtpPass : String(input.smtpPass),
+    smtpPass: nextSmtpPassword(input.smtpPass, current.smtpPass),
     smtpFrom: String(input.smtpFrom ?? current.smtpFrom).trim(),
     appPublicUrl: String(input.appPublicUrl ?? current.appPublicUrl).trim().replace(/\/$/, ''),
   };
