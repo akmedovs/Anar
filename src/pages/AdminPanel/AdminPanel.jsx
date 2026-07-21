@@ -131,6 +131,7 @@ function AdminPanel() {
         smtpPass: '',
       });
       setNotice('Mail ayarları saxlanıldı.');
+      window.alert('Mail ayarları saxlanıldı. SMTP şifrəsi təhlükəsizlik üçün boş göstərilir.');
     } catch (error) {
       setNotice(error.message);
     }
@@ -417,6 +418,7 @@ function AdminPanel() {
                 placeholder={mailDraft.smtpPassSet ? 'Dəyişmirsənsə boş saxla' : 'SMTP app password'}
                 autoComplete="new-password"
               />
+              <div style={fieldHint}>{mailDraft.smtpPassSet ? 'Şifrə saxlanılıb. Dəyişmək istəmirsənsə bu sahəni boş saxla.' : 'Gmail istifadə edirsənsə app password yaz.'}</div>
             </Field>
             <Field label="Reset link URL">
               <input name="appPublicUrl" value={mailDraft.appPublicUrl} onChange={handleMailChange} style={inputStyle} placeholder="http://SERVER_IP:5173" />
@@ -865,6 +867,7 @@ const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(22
 const gridMobile = { ...grid, gridTemplateColumns: '1fr' };
 const labelStyle = { display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: '600', color: theme.colors.muted };
 const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${theme.colors.border}`, boxSizing: 'border-box', fontSize: '15px' };
+const fieldHint = { marginTop: '5px', fontSize: '12px', color: theme.colors.muted, lineHeight: 1.35 };
 const checkLabel = { ...labelStyle, display: 'flex', gap: '8px', alignItems: 'center', marginBottom: 0 };
 const button = { padding: '15px', background: theme.colors.success, color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '15px' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
