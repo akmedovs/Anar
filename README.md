@@ -227,6 +227,16 @@ cp .env.example .env
 - `AUTH_JWT_SECRET` - login token imzası üçün uzun random secret
 - `APP_PUBLIC_URL` - ilk default reset link ünvanı; sonra AdminPanel-dən dəyişmək olar
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` - opsional fallback SMTP ayarları; əsas idarəetmə AdminPanel-dədir
+- `SNAPSHOT_SCAN_INTERVAL_MS` - XVR FTP snapshot watcher scan intervalı, default `3000`
+- `SNAPSHOT_PROCESS_EXISTING` - watcher start olanda qovluqda olan köhnə şəkilləri də işləsin, default `false`
+- `SNAPSHOT_DEFAULT_DIRECTION` - FTP snapshot üçün default istiqamət: `entry` və ya `exit`
+- `SNAPSHOT_SOURCE` - recognition source adı, default `xvr-ftp`
+
+## XVR FTP snapshot axını
+
+XVR snapshot-ları serverdə `/var/www/carwash_snapshots` qovluğuna yazmalıdır. `snapshot-watcher` konteyneri bu qovluğu oxuyur, yeni şəkli `server/uploads/vehicle-captures` volume-na kopyalayır, `recognition_jobs` cədvəlinə job əlavə edir və BullMQ worker avtomatik plate recognition prosesini başladır.
+
+Default olaraq watcher start olanda qovluqda əvvəldən olan köhnə şəkillər işlənmir. Yalnız startdan sonra gələn yeni `.jpg`, `.jpeg`, `.png`, `.webp` fayllar işlənir.
 
 ## Yedəkləmə
 
@@ -247,5 +257,6 @@ cat anar.dump | docker compose exec -T db psql -U anar_user -d anar
 - `web` konteyneri frontend-i `5173`-də açır.
 - `api` konteyneri backend-i `3001`-də açır.
 - `vision` konteyneri plate recognition pipeline-i `8000`-də açır.
+- `snapshot-watcher` konteyneri `/var/www/carwash_snapshots` FTP folderindən yeni XVR şəkillərini avtomatik recognition queue-ya əlavə edir.
 - `db` konteyneri PostgreSQL saxlayır.
 - `server/db.json` köhnə import üçün qala bilər, amma aktiv storage deyil.

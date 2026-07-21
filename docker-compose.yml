@@ -94,6 +94,33 @@ services:
       - anar_uploads:/app/server/uploads
     command: ["node", "server/recognition-worker.js"]
 
+  snapshot-watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: anar-snapshot-watcher
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      worker:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgres://anar_user:07570931017072aA%21@db:5432/anar"
+      REDIS_URL: redis://redis:6379
+      SNAPSHOT_WATCH_DIR: /app/server/ftp-snapshots
+      SNAPSHOT_UPLOADS_DIR: /app/server/uploads/vehicle-captures
+      SNAPSHOT_SCAN_INTERVAL_MS: "${SNAPSHOT_SCAN_INTERVAL_MS:-3000}"
+      SNAPSHOT_PROCESS_EXISTING: "${SNAPSHOT_PROCESS_EXISTING:-false}"
+      SNAPSHOT_DEFAULT_DIRECTION: "${SNAPSHOT_DEFAULT_DIRECTION:-entry}"
+      SNAPSHOT_SOURCE: "${SNAPSHOT_SOURCE:-xvr-ftp}"
+    volumes:
+      - anar_uploads:/app/server/uploads
+      - /var/www/carwash_snapshots:/app/server/ftp-snapshots:ro
+    command: ["node", "server/snapshot-watcher.js"]
+
   vision:
     build:
       context: .
