@@ -231,10 +231,13 @@ cp .env.example .env
 - `SNAPSHOT_PROCESS_EXISTING` - watcher start olanda qovluqda olan köhnə şəkilləri də işləsin, default `false`
 - `SNAPSHOT_DEFAULT_DIRECTION` - FTP snapshot üçün default istiqamət: `entry` və ya `exit`
 - `SNAPSHOT_SOURCE` - recognition source adı, default `xvr-ftp`
+- `SNAPSHOT_FILE_ACTION` - `move` və ya `copy`; default `move`, yəni FTP folderdə ikinci nüsxə saxlanmır
 
 ## XVR FTP snapshot axını
 
-XVR snapshot-ları serverdə `/var/www/carwash_snapshots` qovluğuna yazmalıdır. `snapshot-watcher` konteyneri bu qovluğu oxuyur, yeni şəkli `server/uploads/vehicle-captures` volume-na kopyalayır, `recognition_jobs` cədvəlinə job əlavə edir və BullMQ worker avtomatik plate recognition prosesini başladır.
+XVR snapshot-ları serverdə `/var/www/carwash_snapshots` qovluğuna yazmalıdır. `snapshot-watcher` konteyneri bu qovluğu oxuyur, yeni şəkli `server/uploads/vehicle-captures` volume-na köçürür, `recognition_jobs` cədvəlinə job əlavə edir və BullMQ worker avtomatik plate recognition prosesini başladır.
+
+Default `SNAPSHOT_FILE_ACTION=move` olduğu üçün şəkil iki yerdə saxlanmır: watcher faylı götürəndən sonra `/var/www/carwash_snapshots` içindən çıxarır və yalnız app uploads volume-da saxlayır. Əgər FTP folderdə də arxiv qalmalıdırsa, `SNAPSHOT_FILE_ACTION=copy` yazmaq olar.
 
 Default olaraq watcher start olanda qovluqda əvvəldən olan köhnə şəkillər işlənmir. Yalnız startdan sonra gələn yeni `.jpg`, `.jpeg`, `.png`, `.webp` fayllar işlənir.
 

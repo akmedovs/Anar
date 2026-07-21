@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import pg from 'pg';
 import { getRecognitionQueue } from './recognition-queue.js';
@@ -19,6 +19,7 @@ const scanIntervalMs = Number(process.env.SNAPSHOT_SCAN_INTERVAL_MS || 3000) || 
 const processExisting = String(process.env.SNAPSHOT_PROCESS_EXISTING || 'false').toLowerCase() === 'true';
 const defaultDirection = process.env.SNAPSHOT_DEFAULT_DIRECTION === 'exit' ? 'exit' : 'entry';
 const defaultSource = String(process.env.SNAPSHOT_SOURCE || 'xvr-ftp').trim() || 'xvr-ftp';
+const fileAction = String(process.env.SNAPSHOT_FILE_ACTION || 'move').toLowerCase() === 'copy' ? 'copy' : 'move';
 const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 const pool = new Pool({ connectionString: databaseUrl });
@@ -88,7 +89,17 @@ async function createRecognitionJobFromSnapshot(sourcePath) {
   const ext = path.extname(sourcePath).toLowerCase() || '.jpg';
   const fileName = `${Date.now()}-${randomUUID()}${ext}`;
   const targetPath = path.join(uploadsDir, fileName);
-  await copyFile(sourcePath, targetPath);
+  if (fileAction === 'copy') {
+    await copyFile(sourcePath, targetPath);
+  } else {
+    try {
+      await rename(sourcePath, targetPath);
+    } catch (error) {
+      if (error?.code !== 'EXDEV') throw error;
+      await copyFile(sourcePath, targetPath);
+      await unlink(sourcePath);
+    }
+  }
 
   const publicPath = `/uploads/vehicle-captures/${normalizePublicPath(fileName)}`;
   const jobId = randomUUID();
@@ -193,6 +204,7 @@ async function scan() {
 
 console.log('[snapshot-watcher] watching', watchDir);
 console.log('[snapshot-watcher] direction', defaultDirection, 'source', defaultSource);
+console.log('[snapshot-watcher] file action', fileAction);
 await scan();
 const timer = setInterval(scan, scanIntervalMs);
 
