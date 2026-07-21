@@ -70,6 +70,18 @@ export const authApi = {
   },
 };
 
+export const settingsApi = {
+  getMailSettings() {
+    return request('/api/settings/mail');
+  },
+  updateMailSettings(payload) {
+    return request('/api/settings/mail', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
 function parseJson(raw) {
   try {
     return JSON.parse(raw);

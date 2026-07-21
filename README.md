@@ -94,17 +94,7 @@ AUTH_JWT_SECRET=UZUN_RANDOM_SECRET_YAZ
 APP_PUBLIC_URL=http://SERVER_IP:5173
 ```
 
-Şifrə reset linkinin emailə getməsi üçün SMTP ayarlarını da yaz:
-
-```env
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-SMTP_FROM="Akmedovs <your-email@gmail.com>"
-```
-
+Şifrə reset emaili üçün SMTP ayarlarını sistemə admin kimi daxil olduqdan sonra `AdminPanel -> Reset email ayarları` bölməsindən yaz.
 SMTP boş olsa sistem işləyəcək, amma reset link emailə getməyəcək; link backend logunda görünəcək.
 
 ### 5. Proyekti build edib işə sal
@@ -235,8 +225,8 @@ cp .env.example .env
 - `AUTH_ADMIN_PASSWORD` - ilk admin şifrəsi
 - `AUTH_ADMIN_EMAIL` - admin emaili; password reset üçün lazımdır
 - `AUTH_JWT_SECRET` - login token imzası üçün uzun random secret
-- `APP_PUBLIC_URL` - reset linklərində istifadə olunan sayt ünvanı
-- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` - mail reset üçün SMTP ayarları
+- `APP_PUBLIC_URL` - ilk default reset link ünvanı; sonra AdminPanel-dən dəyişmək olar
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` - opsional fallback SMTP ayarları; əsas idarəetmə AdminPanel-dədir
 
 ## Yedəkləmə
 

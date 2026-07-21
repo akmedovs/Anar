@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { authApi, reportsApi, washExpensesApi, washWaterApi } from '../../api/reports';
+import { authApi, reportsApi, settingsApi, washExpensesApi, washWaterApi } from '../../api/reports';
 import { aylar, cariIl, formatDateAz, formatMoney, localDateKey } from '../../constants/reporting';
 import { theme } from '../../constants/theme';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -27,6 +27,7 @@ function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [userForm, setUserForm] = useState({ username: '', email: '', password: '', isAdmin: false });
   const [passwordForm, setPasswordForm] = useState({});
+  const [mailDraft, setMailDraft] = useState(defaultMailSettings);
 
   useEffect(() => {
     Promise.all([reportsApi.list({ il: year }), washWaterApi.list({ il: year }), washExpensesApi.list({ il: year })])
@@ -38,10 +39,6 @@ function AdminPanel() {
       .catch((error) => setNotice(error.message));
   }, [year]);
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
   const loadUsers = async () => {
     try {
       setUsers(await authApi.listUsers());
@@ -49,6 +46,24 @@ function AdminPanel() {
       setNotice(error.message);
     }
   };
+
+  const loadMailSettings = async () => {
+    try {
+      const result = await settingsApi.getMailSettings();
+      setMailDraft({
+        ...defaultMailSettings(),
+        ...(result.settings || {}),
+        smtpPass: '',
+      });
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+    loadMailSettings();
+  }, []);
 
   const editItems = useMemo(() => {
     const monthIndex = editMonth === 'Bütün Aylar' ? -1 : aylar.indexOf(editMonth);
@@ -86,6 +101,11 @@ function AdminPanel() {
     setTenantForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleMailChange = (e) => {
+    const { name, type, checked, value } = e.target;
+    setMailDraft((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+  };
+
   const saveSettings = () => {
     const next = {
       isiqTarif: String(draft.isiqTarif || '0.15'),
@@ -98,6 +118,22 @@ function AdminPanel() {
     localStorage.setItem('qlobal_ayarlar', JSON.stringify(next));
     setNotice('Qlobal tariflər saxlanıldı.');
     window.alert('Qlobal tariflər saxlanıldı.');
+  };
+
+  const saveMailSettings = async (e) => {
+    e.preventDefault();
+
+    try {
+      const result = await settingsApi.updateMailSettings(mailDraft);
+      setMailDraft({
+        ...defaultMailSettings(),
+        ...(result.settings || {}),
+        smtpPass: '',
+      });
+      setNotice('Mail ayarları saxlanıldı.');
+    } catch (error) {
+      setNotice(error.message);
+    }
   };
 
   const inferSuNefer = (item) => {
@@ -346,6 +382,54 @@ function AdminPanel() {
         <button type="button" onClick={saveSettings} style={button}>
           Yadda Saxla
         </button>
+      </section>
+
+      <section style={card}>
+        <div style={isMobile ? sectionHeadSimpleMobile : sectionHeadSimple}>
+          <div>
+            <div style={sectionEyebrow}>MAIL SETTINGS</div>
+            <h2 style={sectionTitle}>Reset email ayarları</h2>
+          </div>
+          <div style={sectionHint}>{mailDraft.smtpPassSet ? 'SMTP şifrəsi saxlanılıb' : 'SMTP şifrəsi hələ saxlanılmayıb'}</div>
+        </div>
+
+        <form onSubmit={saveMailSettings} style={{ display: 'grid', gap: '12px' }}>
+          <div style={isMobile ? gridMobile : grid}>
+            <Field label="SMTP host">
+              <input name="smtpHost" value={mailDraft.smtpHost} onChange={handleMailChange} style={inputStyle} placeholder="smtp.gmail.com" />
+            </Field>
+            <Field label="SMTP port">
+              <input name="smtpPort" type="number" value={mailDraft.smtpPort} onChange={handleMailChange} style={inputStyle} placeholder="587" />
+            </Field>
+            <Field label="SMTP user">
+              <input name="smtpUser" value={mailDraft.smtpUser} onChange={handleMailChange} style={inputStyle} placeholder="mail@example.com" />
+            </Field>
+            <Field label="From">
+              <input name="smtpFrom" value={mailDraft.smtpFrom} onChange={handleMailChange} style={inputStyle} placeholder="Akmedovs <mail@example.com>" />
+            </Field>
+            <Field label="SMTP password">
+              <input
+                name="smtpPass"
+                type="password"
+                value={mailDraft.smtpPass}
+                onChange={handleMailChange}
+                style={inputStyle}
+                placeholder={mailDraft.smtpPassSet ? 'Dəyişmirsənsə boş saxla' : 'SMTP app password'}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field label="Reset link URL">
+              <input name="appPublicUrl" value={mailDraft.appPublicUrl} onChange={handleMailChange} style={inputStyle} placeholder="http://SERVER_IP:5173" />
+            </Field>
+          </div>
+
+          <label style={checkLabel}>
+            <input type="checkbox" name="smtpSecure" checked={Boolean(mailDraft.smtpSecure)} onChange={handleMailChange} />
+            Secure SMTP
+          </label>
+
+          <button type="submit" style={button}>Mail ayarlarını saxla</button>
+        </form>
       </section>
 
       <section style={card}>
@@ -713,6 +797,19 @@ function loadTenantHistory() {
   }
 }
 
+function defaultMailSettings() {
+  return {
+    smtpHost: '',
+    smtpPort: '587',
+    smtpSecure: false,
+    smtpUser: '',
+    smtpPass: '',
+    smtpFrom: '',
+    appPublicUrl: typeof window === 'undefined' ? 'http://localhost:5173' : window.location.origin,
+    smtpPassSet: false,
+  };
+}
+
 function yearOptions() {
   const current = new Date().getFullYear();
   return [current - 1, current, current + 1];
@@ -768,6 +865,7 @@ const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(22
 const gridMobile = { ...grid, gridTemplateColumns: '1fr' };
 const labelStyle = { display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: '600', color: theme.colors.muted };
 const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${theme.colors.border}`, boxSizing: 'border-box', fontSize: '15px' };
+const checkLabel = { ...labelStyle, display: 'flex', gap: '8px', alignItems: 'center', marginBottom: 0 };
 const button = { padding: '15px', background: theme.colors.success, color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '15px' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' };
 const rowStyleMobile = { ...rowStyle, gridTemplateColumns: '1fr' };

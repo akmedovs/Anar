@@ -53,6 +53,15 @@ const appPublicUrl = String(process.env.APP_PUBLIC_URL || 'http://localhost:5173
 const initialAdminUsername = String(process.env.AUTH_ADMIN_USERNAME || 'akmedovs').trim();
 const initialAdminPassword = String(process.env.AUTH_ADMIN_PASSWORD || '').trim();
 const initialAdminEmail = String(process.env.AUTH_ADMIN_EMAIL || '').trim();
+const mailSettingKeys = [
+  'smtpHost',
+  'smtpPort',
+  'smtpSecure',
+  'smtpUser',
+  'smtpPass',
+  'smtpFrom',
+  'appPublicUrl',
+];
 
 const monthOrder = [
   'Yanvar',
@@ -372,6 +381,86 @@ function verifyAuthToken(token) {
 
 function tokenHash(token) {
   return createHash('sha256').update(String(token)).digest('hex');
+}
+
+function defaultMailSettings() {
+  return {
+    smtpHost: String(process.env.SMTP_HOST || ''),
+    smtpPort: String(process.env.SMTP_PORT || '587'),
+    smtpSecure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+    smtpUser: String(process.env.SMTP_USER || ''),
+    smtpPass: String(process.env.SMTP_PASS || ''),
+    smtpFrom: String(process.env.SMTP_FROM || ''),
+    appPublicUrl,
+  };
+}
+
+function mailSettingsToResponse(settings) {
+  return {
+    smtpHost: settings.smtpHost,
+    smtpPort: settings.smtpPort,
+    smtpSecure: Boolean(settings.smtpSecure),
+    smtpUser: settings.smtpUser,
+    smtpFrom: settings.smtpFrom,
+    appPublicUrl: settings.appPublicUrl,
+    smtpPassSet: Boolean(settings.smtpPass),
+  };
+}
+
+async function getMailSettings() {
+  const settings = defaultMailSettings();
+  const { rows } = await query('SELECT key, value FROM system_settings WHERE key = ANY($1)', [mailSettingKeys]);
+
+  for (const row of rows) {
+    if (row.key === 'smtpSecure') {
+      settings.smtpSecure = String(row.value || '').toLowerCase() === 'true';
+    } else if (row.key in settings) {
+      settings[row.key] = String(row.value || '');
+    }
+  }
+
+  settings.smtpPort = String(settings.smtpPort || '587');
+  settings.appPublicUrl = String(settings.appPublicUrl || appPublicUrl).trim().replace(/\/$/, '');
+  return settings;
+}
+
+async function updateMailSettings(input) {
+  const current = await getMailSettings();
+  const next = {
+    smtpHost: String(input.smtpHost ?? '').trim(),
+    smtpPort: String(input.smtpPort ?? '587').trim(),
+    smtpSecure: Boolean(input.smtpSecure),
+    smtpUser: String(input.smtpUser ?? '').trim(),
+    smtpPass: input.smtpPass === undefined || String(input.smtpPass) === '' ? current.smtpPass : String(input.smtpPass),
+    smtpFrom: String(input.smtpFrom ?? '').trim(),
+    appPublicUrl: String(input.appPublicUrl ?? appPublicUrl).trim().replace(/\/$/, ''),
+  };
+
+  if (next.smtpPort && !Number.isInteger(Number(next.smtpPort))) {
+    const error = new Error('SMTP port rəqəm olmalıdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!next.appPublicUrl) {
+    const error = new Error('APP public URL yazılmalıdır.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  for (const key of mailSettingKeys) {
+    await query(
+      `
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ($1,$2,now())
+        ON CONFLICT (key)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+      `,
+      [key, key === 'smtpSecure' ? String(next.smtpSecure) : String(next[key] || '')],
+    );
+  }
+
+  return { ok: true, settings: mailSettingsToResponse(next) };
 }
 
 function userToResponse(row) {
@@ -1017,28 +1106,29 @@ async function adminResetUserPassword(userId, input) {
   return { ok: true, user: userToResponse(result.rows[0]) };
 }
 
-function smtpConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_FROM);
+function smtpConfigured(settings) {
+  return Boolean(settings.smtpHost && settings.smtpPort && settings.smtpFrom);
 }
 
 async function sendPasswordResetMail(user, resetUrl) {
-  if (!smtpConfigured()) {
+  const settings = await getMailSettings();
+  if (!smtpConfigured(settings)) {
     console.warn(`[auth] SMTP qurulmayıb. Reset link (${user.username}): ${resetUrl}`);
     return { sent: false };
   }
 
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
-    auth: process.env.SMTP_USER ? {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS || '',
+    host: settings.smtpHost,
+    port: Number(settings.smtpPort),
+    secure: Boolean(settings.smtpSecure),
+    auth: settings.smtpUser ? {
+      user: settings.smtpUser,
+      pass: settings.smtpPass || '',
     } : undefined,
   });
 
   await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+    from: settings.smtpFrom,
     to: user.email,
     subject: 'Akmedovs - şifrə yeniləmə',
     text: `Şifrənizi yeniləmək üçün linki açın: ${resetUrl}\n\nBu link 1 saat qüvvədədir.`,
@@ -1071,8 +1161,9 @@ async function requestPasswordReset(input) {
   const user = result.rows[0];
 
   if (user?.email) {
+    const settings = await getMailSettings();
     const token = randomBytes(32).toString('base64url');
-    const resetUrl = `${appPublicUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    const resetUrl = `${settings.appPublicUrl}/reset-password?token=${encodeURIComponent(token)}`;
     await query(
       `
         INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
@@ -2028,6 +2119,18 @@ async function handleRequest(req, res) {
   if (authUsersPasswordMatch && req.method === 'POST') {
     await requireAdmin(req);
     sendJson(res, 200, await adminResetUserPassword(authUsersPasswordMatch[1], await readJson(req)));
+    return;
+  }
+
+  if (url.pathname === '/api/settings/mail' && req.method === 'GET') {
+    await requireAdmin(req);
+    sendJson(res, 200, { ok: true, settings: mailSettingsToResponse(await getMailSettings()) });
+    return;
+  }
+
+  if (url.pathname === '/api/settings/mail' && req.method === 'PUT') {
+    await requireAdmin(req);
+    sendJson(res, 200, await updateMailSettings(await readJson(req)));
     return;
   }
 
